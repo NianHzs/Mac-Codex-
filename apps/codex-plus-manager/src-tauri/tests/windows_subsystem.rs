@@ -455,6 +455,42 @@ fn codework_installer_is_independent_and_packages_notices() {
     assert!(!nsi.contains("Uninstall\\Codex++"));
     assert!(build_script.contains("CARGO_INCREMENTAL"));
     assert!(build_script.contains("CARGO_BUILD_JOBS"));
+    assert!(build_script.contains("$env:CARGO_TARGET_DIR"));
+    assert!(build_script.contains("CodeworkCodexPlusPlus\\cargo-target"));
+    assert!(build_script.contains("$cargoReleaseDir"));
+    assert!(build_script.contains(
+        "Join-Path $cargoReleaseDir 'codework-codex-plus-plus.exe'"
+    ));
+    assert!(build_script.contains(
+        "Join-Path $cargoReleaseDir 'codework-codex-plus-plus-manager.exe'"
+    ));
+    assert!(build_script.contains("function Assert-NativeSuccess"));
+    for checked_command in [
+        "Assert-NativeSuccess 'npm ci' $LASTEXITCODE",
+        "Assert-NativeSuccess 'npm run check' $LASTEXITCODE",
+        "Assert-NativeSuccess 'npm run vite:build' $LASTEXITCODE",
+        "Assert-NativeSuccess 'cargo test --workspace --jobs 1' $LASTEXITCODE",
+        "Assert-NativeSuccess 'cargo build --release --jobs 1' $LASTEXITCODE",
+        "Assert-NativeSuccess 'makensis' $LASTEXITCODE",
+    ] {
+        assert!(
+            build_script.contains(checked_command),
+            "build script must stop after native command failure: {checked_command}"
+        );
+    }
+    assert!(build_script.contains("$forbiddenStrings = @("));
+    assert!(build_script.contains("$legacyAlipayLabel = -join"));
+    assert!(build_script.contains("0x652F, 0x4ED8, 0x5B9D, 0x8D5E, 0x8D4F, 0x7801"));
+    assert!(!build_script.contains("支付宝赞赏码"));
+    assert!(build_script.contains(
+        "& rg -F -a -n -- $forbiddenText $stage $installer (Join-Path $manager 'dist')"
+    ));
+    assert!(!build_script.contains("$forbidden = '"));
+    assert!(build_script.contains("$requiredBinaryStrings = @("));
+    assert!(build_script.contains("$requiredFrontendStrings = @("));
+    assert!(build_script.contains("& rg -F -a -l -- $requiredText $stage"));
+    assert!(build_script.contains("& rg -F -l -- $requiredText (Join-Path $manager 'dist')"));
+    assert!(!build_script.contains("$requiredPattern ="));
     assert!(notices.contains("MIT License"));
     assert!(notices.contains("https://github.com/BigPizzaV3/CodexPlusPlus"));
 }
