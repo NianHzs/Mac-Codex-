@@ -99,6 +99,36 @@ fn codework_windows_identity_is_isolated_from_upstream() {
 }
 
 #[test]
+fn codework_homepage_and_provider_preset_are_present() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
+        .expect("read manager App.tsx");
+    let codework = std::fs::read_to_string(manifest_dir.join("../src/codework.ts"))
+        .expect("read Codework constants");
+    let presets = std::fs::read_to_string(manifest_dir.join("../src/presets.ts"))
+        .expect("read provider presets");
+
+    assert!(app.contains("CODEWORK_PROVIDER_NAME"));
+    assert!(app.contains("CODEWORK_REGISTER_URL"));
+    assert!(codework.contains("Codework AI 内部技术应用"));
+    assert!(codework.contains("https://gptproxy.site/register?aff=Kw5y"));
+    assert!(presets.contains("id: \"codework-ai\""));
+    assert!(presets.contains("CODEWORK_API_BASE_URL"));
+    assert!(codework.contains("https://gptproxy.site/v1"));
+}
+
+#[test]
+fn manager_has_no_recommendation_route_or_jojocode_home_card() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
+        .expect("read manager App.tsx");
+
+    assert!(!app.contains("id: \"recommendations\""));
+    assert!(!app.contains("jojocode-overview"));
+    assert!(!app.contains("actions.openExternalUrl(\"https://jojocode.com/\")"));
+}
+
+#[test]
 fn launcher_binary_embeds_codex_icon_resource() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let launcher_build = manifest_dir

@@ -163,6 +163,16 @@ export const PRESETS: ProviderPreset[] = [
 
   // ── 聚合/中转 ──
   {
+    id: "codework-ai",
+    name: CODEWORK_PROVIDER_NAME,
+    websiteUrl: CODEWORK_REGISTER_URL,
+    apiKeyUrl: CODEWORK_REGISTER_URL,
+    category: "aggregator",
+    baseUrl: CODEWORK_API_BASE_URL,
+    protocol: "responses",
+    model: "gpt-5.5",
+  },
+  {
     id: "jojocode",
     name: "JOJO Code",
     websiteUrl: "https://jojocode.com/",
@@ -290,3 +300,8 @@ export const PRESETS: ProviderPreset[] = [
     websiteUrl: "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
   },
 ];
+import {
+  CODEWORK_API_BASE_URL,
+  CODEWORK_PROVIDER_NAME,
+  CODEWORK_REGISTER_URL,
+} from "./codework";
