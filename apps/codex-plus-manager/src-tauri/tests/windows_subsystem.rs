@@ -456,7 +456,10 @@ fn codework_installer_is_independent_and_packages_notices() {
     assert!(build_script.contains("CARGO_INCREMENTAL"));
     assert!(build_script.contains("CARGO_BUILD_JOBS"));
     assert!(build_script.contains("$env:CARGO_TARGET_DIR"));
-    assert!(build_script.contains("CodeworkCodexPlusPlus\\cargo-target"));
+    assert!(build_script.contains("'D:\\CodeworkBuildCache\\cargo-target'"));
+    assert!(!build_script.contains(
+        "Join-Path $env:LOCALAPPDATA 'CodeworkCodexPlusPlus\\cargo-target'"
+    ));
     assert!(build_script.contains("$cargoReleaseDir"));
     assert!(build_script.contains(
         "Join-Path $cargoReleaseDir 'codework-codex-plus-plus.exe'"

@@ -8,7 +8,7 @@ $version = '1.2.34'
 $env:CARGO_INCREMENTAL = '0'
 $env:CARGO_BUILD_JOBS = '1'
 $env:__COMPAT_LAYER = 'RunAsInvoker'
-$env:CARGO_TARGET_DIR = Join-Path $env:LOCALAPPDATA 'CodeworkCodexPlusPlus\cargo-target'
+$env:CARGO_TARGET_DIR = 'D:\CodeworkBuildCache\cargo-target'
 $cargoReleaseDir = Join-Path $env:CARGO_TARGET_DIR 'release'
 
 function Assert-NativeSuccess {
