@@ -24,17 +24,15 @@ pub fn run() {
     let Some(_guard) = acquire_single_instance_guard() else {
         return;
     };
-    let show_update = commands::startup_should_show_update();
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
-            let url = if show_update {
-                "/index.html?showUpdate=1"
-            } else {
-                "/index.html"
-            };
             let mut main_window_builder =
-                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(url.into()))
+                tauri::WebviewWindowBuilder::new(
+                    app,
+                    "main",
+                    tauri::WebviewUrl::App("/index.html".into()),
+                )
                     .title("Codework Codex++ 管理工具")
                     .inner_size(1180.0, 820.0)
                     .min_inner_size(960.0, 720.0);
@@ -48,7 +46,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::backend_version,
-            commands::startup_options,
             commands::load_overview,
             commands::launch_codex_plus,
             commands::restart_codex_plus,
@@ -79,8 +76,6 @@ pub fn run() {
             commands::repair_plugin_marketplace,
             commands::remote_plugin_marketplace_status,
             commands::repair_remote_plugin_marketplace,
-            commands::check_update,
-            commands::perform_update,
             commands::load_watcher_state,
             commands::install_watcher,
             commands::uninstall_watcher,

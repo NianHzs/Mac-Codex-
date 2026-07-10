@@ -404,14 +404,57 @@ fn manager_ui_no_longer_exposes_command_wrapper_or_startup_marketplace_prompt() 
 }
 
 #[test]
-fn manager_update_install_keeps_visible_progress_bar() {
+fn codework_build_does_not_call_or_register_upstream_updater() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let app_tsx = manifest_dir.parent().unwrap().join("src/App.tsx");
     let app_tsx = std::fs::read_to_string(&app_tsx).expect("read manager App.tsx");
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+    let lib = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))
+        .expect("read manager lib");
+    let launcher = std::fs::read_to_string(
+        manifest_dir.join("../../codex-plus-launcher/src/main.rs"),
+    )
+    .expect("read launcher main");
+    let core_lib = std::fs::read_to_string(
+        manifest_dir.join("../../../crates/codex-plus-core/src/lib.rs"),
+    )
+    .expect("read core lib");
 
-    assert!(app_tsx.contains("下载并运行安装包"));
-    assert!(app_tsx.contains("updateInstallProgress"));
-    assert!(app_tsx.contains("安装包更新进度"));
-    assert!(app_tsx.contains("completedTitle={t(\"上次更新结果\")}"));
-    assert!(app_tsx.contains("progress={updateInstallProgress}"));
+    assert!(!app_tsx.contains("check_update"));
+    assert!(!app_tsx.contains("perform_update"));
+    assert!(!app_tsx.contains("updateInstallProgress"));
+    assert!(!commands.contains("pub async fn check_update"));
+    assert!(!commands.contains("pub async fn perform_update"));
+    assert!(!lib.contains("commands::check_update"));
+    assert!(!lib.contains("commands::perform_update"));
+    assert!(!launcher.contains("notify_manager_when_update_available"));
+    assert!(!core_lib.contains("pub mod update;"));
+}
+
+#[test]
+fn codework_installer_is_independent_and_packages_notices() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = manifest_dir.join("../../..");
+    let nsi = std::fs::read_to_string(
+        root.join("scripts/installer/windows/CodeworkCodexPlusPlus.nsi"),
+    )
+    .expect("read Codework NSIS installer");
+    let build_script = std::fs::read_to_string(root.join("scripts/build-codework-windows.ps1"))
+        .expect("read Codework build script");
+    let notices = std::fs::read_to_string(root.join("THIRD_PARTY_NOTICES.txt"))
+        .expect("read third-party notices");
+
+    assert!(nsi.contains("Name \"Codework Codex++\""));
+    assert!(nsi.contains("InstallDir \"$LOCALAPPDATA\\Programs\\Codework Codex++\""));
+    assert!(nsi.contains("Codework-CodexPlusPlus-${VERSION}-windows-x64-setup.exe"));
+    assert!(nsi.contains("codework-codex-plus-plus.exe"));
+    assert!(nsi.contains("codework-codex-plus-plus-manager.exe"));
+    assert!(nsi.contains("THIRD_PARTY_NOTICES.txt"));
+    assert!(!nsi.contains("taskkill /IM codex-plus-plus.exe"));
+    assert!(!nsi.contains("Uninstall\\Codex++"));
+    assert!(build_script.contains("CARGO_INCREMENTAL"));
+    assert!(build_script.contains("CARGO_BUILD_JOBS"));
+    assert!(notices.contains("MIT License"));
+    assert!(notices.contains("https://github.com/BigPizzaV3/CodexPlusPlus"));
 }
