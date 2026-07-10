@@ -49,12 +49,12 @@ fn watcher_enable_and_disable_toggle_flag() {
 fn watcher_install_plan_registers_rust_launcher_at_logon() {
     let plan = build_watcher_install_plan("C:/Tools/codex-plus-plus.exe".into(), 9333);
 
-    assert_eq!(plan.run_value_name, "CodexPlusPlusWatcher");
+    assert_eq!(plan.run_value_name, "CodeworkCodexPlusPlusWatcher");
     assert_eq!(
         plan.run_value,
         "\"C:/Tools/codex-plus-plus.exe\" --debug-port 9333"
     );
-    assert_eq!(plan.shortcut_name, "CodexPlusPlusWatcher.lnk");
+    assert_eq!(plan.shortcut_name, "CodeworkCodexPlusPlusWatcher.lnk");
     assert_eq!(plan.shortcut_target, "C:/Tools/codex-plus-plus.exe");
     assert_eq!(plan.shortcut_arguments, "--debug-port 9333");
 }
@@ -87,7 +87,7 @@ fn codex_process_filter_keeps_only_windowsapps_codex_processes() {
 }
 
 #[test]
-fn codex_process_filter_keeps_chatgpt_desktop_package_processes() {
+fn codex_process_filter_keeps_supported_codex_package_processes() {
     let processes = [
         (
             21,
@@ -107,17 +107,17 @@ fn codex_process_filter_keeps_chatgpt_desktop_package_processes() {
         ),
     ];
 
-    assert_eq!(codex_process_ids(processes), vec![21, 22]);
+    assert_eq!(codex_process_ids(processes), vec![22]);
 }
 
 #[test]
 fn launcher_process_filter_protects_current_process_ancestry() {
     let processes = [
-        (10, 0, "codex-plus-plus.exe"),
-        (20, 10, "codex-plus-plus.exe"),
-        (30, 20, "codex-plus-plus.exe"),
-        (40, 10, "codex-plus-plus.exe"),
-        (50, 10, "codex-plus-plus-manager.exe"),
+        (10, 0, "codework-codex-plus-plus.exe"),
+        (20, 10, "codework-codex-plus-plus.exe"),
+        (30, 20, "codework-codex-plus-plus.exe"),
+        (40, 10, "codework-codex-plus-plus.exe"),
+        (50, 10, "codework-codex-plus-plus-manager.exe"),
     ];
 
     assert_eq!(filter_killable_launcher_processes(processes, 30), vec![40]);
@@ -208,7 +208,7 @@ fn find_codex_processes_combines_store_and_local_installs() {
             parent_process_id: 0,
             exe_file: "ChatGPT.exe".to_string(),
             executable_path: Some(std::path::PathBuf::from(
-                r"C:\Program Files\WindowsApps\OpenAI.ChatGPT-Desktop_1.2026.133.0_x64__abc\app\ChatGPT.exe",
+                r"C:\Program Files\WindowsApps\OpenAI.Codex_26.707.3748.0_x64__abc\app\ChatGPT.exe",
             )),
         },
         WindowsProcessInfo {

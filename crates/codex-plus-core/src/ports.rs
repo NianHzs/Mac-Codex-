@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 
-pub const LAUNCHER_GUARD_PORT_BASE: u16 = 57320;
-pub const MANAGER_GUARD_PORT_BASE: u16 = 57319;
+pub const LAUNCHER_GUARD_PORT_BASE: u16 = 58320;
+pub const MANAGER_GUARD_PORT_BASE: u16 = 58319;
 
 /// Offset applied to guard port base to avoid conflicts in multi-user
 /// environments (Windows RDP, shared servers, etc.).
@@ -340,6 +340,12 @@ mod tests {
         let port = manager_guard_port();
         assert!(port >= MANAGER_GUARD_PORT_BASE);
         assert!(port < MANAGER_GUARD_PORT_BASE + 1000);
+    }
+
+    #[test]
+    fn codework_guard_port_bases_are_isolated_from_upstream() {
+        assert_eq!(LAUNCHER_GUARD_PORT_BASE, 58320);
+        assert_eq!(MANAGER_GUARD_PORT_BASE, 58319);
     }
 
     #[test]

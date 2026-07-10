@@ -1,0 +1,11 @@
+pub const PRODUCT_NAME: &str = "Codework Codex++";
+pub const MANAGER_NAME: &str = "Codework Codex++ 管理工具";
+pub const LAUNCHER_BINARY: &str = "codework-codex-plus-plus";
+pub const MANAGER_BINARY: &str = "codework-codex-plus-plus-manager";
+pub const STATE_DIR: &str = ".codework-codex-plus-plus";
+pub const USER_CONFIG_DIR: &str = "Codework Codex++";
+pub const WATCHER_RUN_NAME: &str = "CodeworkCodexPlusPlusWatcher";
+pub const WATCHER_SHORTCUT_NAME: &str = "CodeworkCodexPlusPlusWatcher.lnk";
+pub const REGISTER_URL: &str = "https://gptproxy.site/register?aff=Kw5y";
+pub const API_BASE_URL: &str = "https://gptproxy.site/v1";
+pub const UPSTREAM_SOURCE_URL: &str = "https://github.com/BigPizzaV3/CodexPlusPlus";
