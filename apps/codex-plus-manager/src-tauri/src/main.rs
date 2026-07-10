@@ -2,7 +2,7 @@
 
 fn main() {
     for arg in std::env::args() {
-        if arg.starts_with("codexplusplus://") {
+        if arg.starts_with("codeworkcodexplusplus://") {
             match codex_plus_core::provider_import::save_pending_provider_import_from_url(&arg) {
                 Ok(request) => {
                     let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
@@ -42,7 +42,7 @@ fn focus_existing_manager_window() {
         }
         if process
             .exe_file
-            .eq_ignore_ascii_case("codex-plus-plus-manager.exe")
+            .eq_ignore_ascii_case("codework-codex-plus-plus-manager.exe")
         {
             let _ = codex_plus_core::windows_activate_process_window(process.process_id);
             break;

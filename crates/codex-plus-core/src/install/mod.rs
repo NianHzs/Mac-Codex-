@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 pub mod macos;
 pub mod windows;
 
-pub const SILENT_NAME: &str = "Codex++";
-pub const MANAGER_NAME: &str = "Codex++ 管理工具";
-pub const SILENT_BINARY: &str = "codex-plus-plus";
-pub const MANAGER_BINARY: &str = "codex-plus-plus-manager";
+pub const SILENT_NAME: &str = crate::branding::PRODUCT_NAME;
+pub const MANAGER_NAME: &str = crate::branding::MANAGER_NAME;
+pub const SILENT_BINARY: &str = crate::branding::LAUNCHER_BINARY;
+pub const MANAGER_BINARY: &str = crate::branding::MANAGER_BINARY;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -72,11 +72,11 @@ impl ShortcutState {
 }
 
 pub fn shortcut_names() -> (&'static str, &'static str) {
-    ("Codex++.lnk", "Codex++ 管理工具.lnk")
+    ("Codework Codex++.lnk", "Codework Codex++ 管理工具.lnk")
 }
 
 pub fn app_bundle_names() -> (&'static str, &'static str) {
-    ("Codex++.app", "Codex++ 管理工具.app")
+    ("Codework Codex++.app", "Codework Codex++ 管理工具.app")
 }
 
 pub fn inspect_entrypoints() -> EntryPointState {

@@ -3108,14 +3108,14 @@ fn default_user_script_manager() -> UserScriptManager {
 fn user_scripts_config_dir() -> PathBuf {
     if cfg!(windows) {
         if let Some(roaming) = std::env::var_os("APPDATA") {
-            return PathBuf::from(roaming).join("Codex++");
+            return PathBuf::from(roaming).join(codex_plus_core::branding::USER_CONFIG_DIR);
         }
     }
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("Codex++")
+        .join(codex_plus_core::branding::USER_CONFIG_DIR)
 }
 
 fn builtin_user_scripts_dir() -> PathBuf {
@@ -3301,7 +3301,7 @@ mod tests {
     #[test]
     fn startup_options_honors_show_update_argument() {
         assert!(should_show_update(
-            ["codex-plus-plus-manager.exe", "--show-update"],
+            ["codework-codex-plus-plus-manager.exe", "--show-update"],
             None
         ));
     }
