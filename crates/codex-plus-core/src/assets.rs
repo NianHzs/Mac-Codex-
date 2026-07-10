@@ -7,8 +7,8 @@ use crate::settings::BackendSettings;
 
 const RENDERER_SCRIPT: &str = include_str!("../../../assets/inject/renderer-inject.js");
 const STEPWISE_SCRIPT: &str = include_str!("../../../assets/inject/stepwise-inject.js");
-const SPONSOR_ALIPAY: &[u8] = include_bytes!("../../../assets/images/sponsor-alipay.jpg");
-const SPONSOR_WECHAT: &[u8] = include_bytes!("../../../assets/images/sponsor-wechat.jpg");
+const SPONSOR_WECHAT: &[u8] =
+    include_bytes!("../../../assets/images/codework-sponsor-wechat.jpg");
 pub const DIAGNOSTIC_BUILD_ID: &str = "diag-20260518-1";
 
 pub fn renderer_script() -> &'static str {
@@ -21,7 +21,6 @@ pub fn stepwise_script() -> &'static str {
 
 pub fn sponsor_image_data_uris() -> Value {
     json!({
-        "alipay": image_data_uri("image/jpeg", SPONSOR_ALIPAY),
         "wechat": image_data_uri("image/jpeg", SPONSOR_WECHAT),
     })
 }
