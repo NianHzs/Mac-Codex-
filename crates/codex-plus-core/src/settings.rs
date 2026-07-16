@@ -393,7 +393,7 @@ impl BackendSettings {
     pub fn active_relay_profile(&self) -> RelayProfile {
         if self.active_relay_id == "default"
             && self.relay_profiles.len() == 1
-            && self.relay_profiles[0].id == "default"
+            && is_legacy_default_relay_profile(&self.relay_profiles[0])
             && (!self.relay_api_key.is_empty() || self.relay_base_url != default_relay_base_url())
         {
             let mut profile = self.relay_profiles[0].clone();
@@ -473,6 +473,30 @@ impl BackendSettings {
         self.active_aggregate_relay_profile().is_some()
             || self.active_relay_profile().protocol == RelayProtocol::ChatCompletions
     }
+}
+
+fn is_legacy_default_relay_profile(profile: &RelayProfile) -> bool {
+    profile.id == "default"
+        && profile.name == "默认中转"
+        && profile.model.is_empty()
+        && profile.base_url.is_empty()
+        && profile.upstream_base_url.is_empty()
+        && profile.api_key.is_empty()
+        && profile.protocol == RelayProtocol::Responses
+        && profile.relay_mode == RelayMode::Official
+        && !profile.official_mix_api_key
+        && profile.test_model.is_empty()
+        && profile.config_contents.is_empty()
+        && profile.auth_contents.is_empty()
+        && profile.use_common_config
+        && profile.context_selection == RelayContextSelection::default()
+        && !profile.context_selection_initialized
+        && profile.context_window.is_empty()
+        && profile.auto_compact_limit.is_empty()
+        && profile.model_insert_mode == RelayModelInsertMode::Patch
+        && profile.model_list.is_empty()
+        && profile.model_windows.is_empty()
+        && profile.user_agent.is_empty()
 }
 
 pub fn default_stepwise_api_key_env() -> String {
@@ -2164,6 +2188,36 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(active.protocol, RelayProtocol::Responses);
         assert_eq!(active.relay_mode, RelayMode::MixedApi);
         assert!(active.official_mix_api_key);
+    }
+
+    #[test]
+    fn active_relay_profile_keeps_configured_default_profile_with_global_credentials() {
+        let settings: BackendSettings = serde_json::from_str(
+            r#"{
+                "relayBaseUrl":"https://legacy.example/v1",
+                "relayApiKey":"sk-legacy",
+                "activeRelayId":"default",
+                "relayProfiles":[{
+                    "id":"default",
+                    "name":"Configured default",
+                    "model":"configured-model",
+                    "baseUrl":"https://configured.example/v1",
+                    "upstreamBaseUrl":"https://configured.example/v1",
+                    "apiKey":"sk-configured",
+                    "protocol":"responses",
+                    "relayMode":"pureApi",
+                    "officialMixApiKey":false,
+                    "testModel":"configured-test-model",
+                    "configContents":"model = \"configured-model\"\n",
+                    "authContents":"{\"OPENAI_API_KEY\":\"sk-configured\"}",
+                    "modelList":"configured-model\nconfigured-alt"
+                }]
+            }"#,
+        )
+        .unwrap();
+        let expected = settings.relay_profiles[0].clone();
+
+        assert_eq!(settings.active_relay_profile(), expected);
     }
 
     #[test]
