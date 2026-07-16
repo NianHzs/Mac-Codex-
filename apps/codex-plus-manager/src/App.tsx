@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
 import {
+  CODEWORK_API_BASE_URL,
   CODEWORK_PRODUCT_NAME,
   CODEWORK_PROVIDER_NAME,
   CODEWORK_REGISTER_URL,
@@ -815,38 +816,48 @@ const defaultSettings: BackendSettings = {
   codexAppVisualThemeServiceUrl: "",
   codexGoalsEnabled: false,
   launchMode: "patch",
-  relayBaseUrl: "",
+  relayBaseUrl: CODEWORK_API_BASE_URL,
   relayApiKey: "",
   relayProfiles: [
     {
-      id: "default",
-      name: t("默认中转"),
-      model: "",
-      baseUrl: "",
-      upstreamBaseUrl: "",
+      id: "codework-ai",
+      name: "Codework AI 官方中转",
+      model: "gpt-5.6-sol",
+      baseUrl: CODEWORK_API_BASE_URL,
+      upstreamBaseUrl: CODEWORK_API_BASE_URL,
       apiKey: "",
       protocol: "responses",
-      relayMode: "official",
+      relayMode: "pureApi",
       officialMixApiKey: false,
-      testModel: "",
-      configContents: "",
+      testModel: "gpt-5.6-sol",
+      configContents: `model_provider = "custom"
+model = "gpt-5.6-sol"
+
+[model_providers]
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "${CODEWORK_API_BASE_URL}"
+`,
       authContents: "",
       useCommonConfig: true,
       contextSelection: emptyContextSelection(),
       contextSelectionInitialized: true,
       contextWindow: "",
       autoCompactLimit: "",
-      modelList: "",
+      modelList: "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5",
       modelWindows: "",
       userAgent: "",
     },
   ],
   relayCommonConfigContents: "",
   relayContextConfigContents: "",
-  activeRelayId: "default",
+  activeRelayId: "codework-ai",
   aggregateRelayProfiles: [],
   activeAggregateRelayId: "",
-  relayTestModel: "gpt-5.4-mini",
+  relayTestModel: "gpt-5.6-sol",
 };
 
 export function App() {

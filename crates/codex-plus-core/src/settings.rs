@@ -45,7 +45,7 @@ pub struct RelayProfile {
     pub name: String,
     #[serde(default, skip_serializing)]
     pub model: String,
-    #[serde(default = "default_relay_base_url", skip_serializing)]
+    #[serde(default, skip_serializing)]
     pub base_url: String,
     #[serde(rename = "upstreamBaseUrl", default)]
     pub upstream_base_url: String,
@@ -128,17 +128,17 @@ pub struct AggregateRelayProfile {
 impl Default for RelayProfile {
     fn default() -> Self {
         Self {
-            id: "default".to_string(),
-            name: "默认中转".to_string(),
-            model: String::new(),
+            id: "codework-ai".to_string(),
+            name: "Codework AI 官方中转".to_string(),
+            model: "gpt-5.6-sol".to_string(),
             base_url: default_relay_base_url(),
-            upstream_base_url: String::new(),
+            upstream_base_url: default_relay_base_url(),
             api_key: String::new(),
             protocol: RelayProtocol::Responses,
-            relay_mode: RelayMode::Official,
+            relay_mode: RelayMode::PureApi,
             official_mix_api_key: false,
-            test_model: String::new(),
-            config_contents: String::new(),
+            test_model: default_relay_test_model(),
+            config_contents: default_relay_config_contents(),
             auth_contents: String::new(),
             use_common_config: true,
             context_selection: RelayContextSelection::default(),
@@ -146,7 +146,7 @@ impl Default for RelayProfile {
             context_window: String::new(),
             auto_compact_limit: String::new(),
             model_insert_mode: RelayModelInsertMode::Patch,
-            model_list: String::new(),
+            model_list: "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5".to_string(),
             model_windows: String::new(),
             user_agent: String::new(),
         }
@@ -396,37 +396,13 @@ impl BackendSettings {
             && self.relay_profiles[0] == RelayProfile::default()
             && (!self.relay_api_key.is_empty() || self.relay_base_url != default_relay_base_url())
         {
-            return RelayProfile {
-                id: default_active_relay_id(),
-                name: "默认中转".to_string(),
-                model: String::new(),
-                base_url: if self.relay_base_url.is_empty() {
-                    default_relay_base_url()
-                } else {
-                    self.relay_base_url.clone()
-                },
-                upstream_base_url: if self.relay_base_url.is_empty() {
-                    default_relay_base_url()
-                } else {
-                    self.relay_base_url.clone()
-                },
-                api_key: self.relay_api_key.clone(),
-                protocol: RelayProtocol::Responses,
-                relay_mode: RelayMode::MixedApi,
-                official_mix_api_key: true,
-                test_model: String::new(),
-                config_contents: String::new(),
-                auth_contents: String::new(),
-                use_common_config: true,
-                context_selection: RelayContextSelection::default(),
-                context_selection_initialized: false,
-                context_window: String::new(),
-                auto_compact_limit: String::new(),
-                model_insert_mode: RelayModelInsertMode::Patch,
-                model_list: String::new(),
-                model_windows: String::new(),
-                user_agent: String::new(),
-            };
+            let mut profile = RelayProfile::default();
+            if !self.relay_base_url.is_empty() {
+                profile.base_url = self.relay_base_url.clone();
+                profile.upstream_base_url = self.relay_base_url.clone();
+            }
+            profile.api_key = self.relay_api_key.clone();
+            return profile;
         }
 
         if let Some(profile) = self
@@ -437,41 +413,16 @@ impl BackendSettings {
             return profile.clone();
         }
 
-        RelayProfile {
-            id: if self.active_relay_id.is_empty() {
-                default_active_relay_id()
-            } else {
-                self.active_relay_id.clone()
-            },
-            name: "默认中转".to_string(),
-            model: String::new(),
-            base_url: if self.relay_base_url.is_empty() {
-                default_relay_base_url()
-            } else {
-                self.relay_base_url.clone()
-            },
-            upstream_base_url: if self.relay_base_url.is_empty() {
-                default_relay_base_url()
-            } else {
-                self.relay_base_url.clone()
-            },
-            api_key: self.relay_api_key.clone(),
-            protocol: RelayProtocol::Responses,
-            relay_mode: RelayMode::Official,
-            official_mix_api_key: false,
-            test_model: String::new(),
-            config_contents: String::new(),
-            auth_contents: String::new(),
-            use_common_config: true,
-            context_selection: RelayContextSelection::default(),
-            context_selection_initialized: false,
-            context_window: String::new(),
-            auto_compact_limit: String::new(),
-            model_insert_mode: RelayModelInsertMode::Patch,
-            model_list: String::new(),
-            model_windows: String::new(),
-            user_agent: String::new(),
+        let mut profile = RelayProfile::default();
+        if !self.active_relay_id.is_empty() {
+            profile.id = self.active_relay_id.clone();
         }
+        if !self.relay_base_url.is_empty() {
+            profile.base_url = self.relay_base_url.clone();
+            profile.upstream_base_url = self.relay_base_url.clone();
+        }
+        profile.api_key = self.relay_api_key.clone();
+        profile
     }
 
     pub fn active_aggregate_relay_profile(&self) -> Option<AggregateRelayProfile> {
@@ -565,15 +516,22 @@ pub fn default_true() -> bool {
 }
 
 pub fn default_relay_base_url() -> String {
-    String::new()
+    crate::branding::API_BASE_URL.to_string()
 }
 
 pub fn default_active_relay_id() -> String {
-    "default".to_string()
+    "codework-ai".to_string()
 }
 
 pub fn default_relay_test_model() -> String {
-    "gpt-5.4-mini".to_string()
+    "gpt-5.6-sol".to_string()
+}
+
+fn default_relay_config_contents() -> String {
+    format!(
+        "model_provider = \"custom\"\nmodel = \"gpt-5.6-sol\"\n\n[model_providers]\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"{}\"\n",
+        crate::branding::API_BASE_URL
+    )
 }
 
 pub fn default_relay_profiles() -> Vec<RelayProfile> {
@@ -1232,6 +1190,44 @@ mod tests {
     }
 
     #[test]
+    fn default_relay_profile_is_codework_ai() {
+        let profile = RelayProfile::default();
+        assert_eq!(profile.id, "codework-ai");
+        assert_eq!(profile.name, "Codework AI 官方中转");
+        assert_eq!(profile.base_url, "https://gptproxy.site/v1");
+        assert_eq!(profile.upstream_base_url, "https://gptproxy.site/v1");
+        assert_eq!(profile.protocol, RelayProtocol::Responses);
+        assert_eq!(profile.relay_mode, RelayMode::PureApi);
+        assert!(!profile.official_mix_api_key);
+        assert_eq!(profile.model, "gpt-5.6-sol");
+        assert_eq!(profile.test_model, "gpt-5.6-sol");
+        assert_eq!(
+            profile.model_list,
+            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5"
+        );
+
+        let settings = BackendSettings::default();
+        assert_eq!(settings.relay_base_url, "https://gptproxy.site/v1");
+        assert_eq!(settings.active_relay_id, "codework-ai");
+        assert_eq!(settings.relay_test_model, "gpt-5.6-sol");
+        assert_eq!(settings.relay_profiles, vec![profile.clone()]);
+        assert_eq!(settings.active_relay_profile(), profile);
+
+        let existing_default = RelayProfile {
+            id: "default".to_string(),
+            name: "Existing default".to_string(),
+            model: "existing-model".to_string(),
+            ..RelayProfile::default()
+        };
+        let settings = BackendSettings {
+            relay_profiles: vec![existing_default.clone()],
+            active_relay_id: "default".to_string(),
+            ..BackendSettings::default()
+        };
+        assert_eq!(settings.active_relay_profile(), existing_default);
+    }
+
+    #[test]
     fn settings_default_matches_expected_behavior() {
         let settings = BackendSettings::default();
         assert!(!settings.provider_sync_enabled);
@@ -1255,7 +1251,7 @@ mod tests {
         assert_eq!(settings.launch_mode, LaunchMode::Patch);
         assert_eq!(settings.relay_base_url, default_relay_base_url());
         assert!(settings.relay_api_key.is_empty());
-        assert_eq!(settings.relay_profiles[0].relay_mode, RelayMode::Official);
+        assert_eq!(settings.relay_profiles[0].relay_mode, RelayMode::PureApi);
         assert!(settings.relay_common_config_contents.is_empty());
         assert_eq!(settings.relay_test_model, default_relay_test_model());
         assert!(!settings.codex_app_stepwise_enabled);
@@ -1354,7 +1350,10 @@ mod tests {
         assert!(profile.context_window.is_empty());
         assert!(profile.auto_compact_limit.is_empty());
         assert_eq!(profile.model_insert_mode, RelayModelInsertMode::Patch);
-        assert!(profile.model_list.is_empty());
+        assert_eq!(
+            profile.model_list,
+            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5"
+        );
     }
 
     #[test]
@@ -1426,6 +1425,7 @@ mod tests {
                 name: "DeepSeek".to_string(),
                 protocol: RelayProtocol::ChatCompletions,
                 relay_mode: RelayMode::PureApi,
+                upstream_base_url: String::new(),
                 config_contents: r#"model = "deepseek-chat"
 codex_plus_chat_base_url = "https://api.deepseek.com"
 model_provider = "custom"
@@ -1733,6 +1733,7 @@ experimental_bearer_token = "sk-existing""#
                 RelayProfile {
                     id: "agg".to_string(),
                     name: "聚合".to_string(),
+                    model: String::new(),
                     relay_mode: RelayMode::Aggregate,
                     ..RelayProfile::default()
                 },
@@ -2109,12 +2110,12 @@ experimental_bearer_token = "sk-existing""#
 
         let active = settings.active_relay_profile();
 
-        assert_eq!(active.id, "default");
-        assert_eq!(active.name, "默认中转");
+        assert_eq!(active.id, "codework-ai");
+        assert_eq!(active.name, "Codework AI 官方中转");
         assert_eq!(active.base_url, "https://legacy.example/v1");
         assert_eq!(active.api_key, "sk-legacy");
-        assert_eq!(active.relay_mode, RelayMode::MixedApi);
-        assert!(active.official_mix_api_key);
+        assert_eq!(active.relay_mode, RelayMode::PureApi);
+        assert!(!active.official_mix_api_key);
     }
 
     #[test]

@@ -110,6 +110,11 @@ fn codework_homepage_and_provider_preset_are_present() {
 
     assert!(app.contains("CODEWORK_PROVIDER_NAME"));
     assert!(app.contains("CODEWORK_REGISTER_URL"));
+    assert!(app.contains("CODEWORK_API_BASE_URL"));
+    assert!(app.contains("id: \"codework-ai\""));
+    assert!(app.contains("name: \"Codework AI 官方中转\""));
+    assert!(app.contains("gpt-5.6-terra"));
+    assert!(app.contains("relayMode: \"pureApi\""));
     assert!(codework.contains("Codework AI 内部技术应用"));
     assert!(codework.contains("https://gptproxy.site/register?aff=Kw5y"));
     assert!(presets.contains("id: \"codework-ai\""));
