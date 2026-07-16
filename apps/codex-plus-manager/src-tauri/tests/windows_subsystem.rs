@@ -512,6 +512,9 @@ fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
 
     assert!(app.contains("id: \"visualTheme\""));
     assert!(app.contains("VisualThemeScreen"));
+    assert!(app.contains("/v1/themes/manifest"));
+    assert!(app.contains("codework-theme-manifest-cache"));
+    assert!(app.contains("isSafeThemeManifest"));
     assert!(renderer.contains("applyCodeworkVisualTheme"));
     assert!(renderer.contains("codexAppVisualThemeEnabled"));
     assert!(renderer.contains("codexAppVisualThemeId"));

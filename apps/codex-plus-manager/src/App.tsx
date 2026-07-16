@@ -60,7 +60,7 @@ import {
   UPSTREAM_SOURCE_URL,
 } from "./codework";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -612,6 +612,124 @@ function syncMarketInstalledState(current: ScriptMarketResult | null, userScript
 
 type Route = "overview" | "relay" | "sessions" | "context" | "enhance" | "visualTheme" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
+
+type VisualThemeTokens = {
+  background: string;
+  surface: string;
+  accent: string;
+  border: string;
+  text: string;
+  radius: number;
+  fontScale: number;
+};
+
+type VisualThemeItem = {
+  id: string;
+  name: string;
+  detail?: string;
+  tier: "pro";
+  version: string;
+  tokens: VisualThemeTokens;
+};
+
+type VisualThemeManifest = {
+  version: string;
+  updatedAt?: string;
+  themes: VisualThemeItem[];
+};
+
+type VisualThemeManifestCache = {
+  serviceUrl: string;
+  manifest: VisualThemeManifest;
+};
+
+const VISUAL_THEME_CACHE_KEY = "codework-theme-manifest-cache";
+const visualThemeTokenKeys = ["background", "surface", "accent", "border", "text", "radius", "fontScale"] as const;
+const visualThemeItemKeys = ["id", "name", "detail", "tier", "version", "tokens"] as const;
+const visualThemeManifestKeys = ["version", "updatedAt", "themes"] as const;
+
+const builtInVisualThemes: VisualThemeItem[] = [
+  {
+    id: "cyber-neon", name: "赛博霓虹", detail: "青绿色高对比与科技感", tier: "pro", version: "builtin",
+    tokens: { background: "#0B1020", surface: "#141B34", accent: "#00E5FF", border: "#2A3C66", text: "#E6F1FF", radius: 8, fontScale: 1 },
+  },
+  {
+    id: "glass-lilac", name: "玻璃紫晶", detail: "半透明紫色玻璃质感", tier: "pro", version: "builtin",
+    tokens: { background: "#1A1427", surface: "#2B1D45", accent: "#C084FC", border: "#5B3A82", text: "#F5EFFF", radius: 16, fontScale: 1 },
+  },
+  {
+    id: "midnight-blue", name: "午夜深蓝", detail: "沉稳的深蓝工作界面", tier: "pro", version: "builtin",
+    tokens: { background: "#0B162A", surface: "#10233F", accent: "#4DA3FF", border: "#294B73", text: "#EAF3FF", radius: 6, fontScale: 0.95 },
+  },
+  {
+    id: "warm-paper", name: "暖调纸感", detail: "温暖低饱和的阅读风格", tier: "pro", version: "builtin",
+    tokens: { background: "#F4EBDD", surface: "#FFF9F0", accent: "#B66A3C", border: "#D7BFA5", text: "#3C2B20", radius: 12, fontScale: 1.05 },
+  },
+];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]) {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
+function isSafeThemeManifest(value: unknown): value is VisualThemeManifest {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, visualThemeManifestKeys)) return false;
+  if (typeof value.version !== "string" || !value.version.trim() || !Array.isArray(value.themes)) return false;
+  if (value.updatedAt !== undefined && (typeof value.updatedAt !== "string" || !value.updatedAt.trim())) return false;
+
+  return value.themes.every((theme) => {
+    if (!isPlainObject(theme) || !hasOnlyKeys(theme, visualThemeItemKeys)) return false;
+    if (typeof theme.id !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(theme.id)) return false;
+    if (typeof theme.name !== "string" || !theme.name.trim()) return false;
+    if (theme.detail !== undefined && (typeof theme.detail !== "string" || !theme.detail.trim())) return false;
+    if (theme.tier !== "pro" || typeof theme.version !== "string" || !theme.version.trim()) return false;
+    if (!isPlainObject(theme.tokens) || !hasOnlyKeys(theme.tokens, visualThemeTokenKeys)) return false;
+
+    const tokens = theme.tokens;
+    return [tokens.background, tokens.surface, tokens.accent, tokens.border, tokens.text]
+      .every((color) => typeof color === "string" && /^#[0-9A-Fa-f]{6}$/.test(color))
+      && Number.isInteger(tokens.radius) && typeof tokens.radius === "number" && tokens.radius >= 0 && tokens.radius <= 32
+      && typeof tokens.fontScale === "number" && Number.isFinite(tokens.fontScale) && tokens.fontScale >= 0.8 && tokens.fontScale <= 1.3;
+  });
+}
+
+function normalizeThemeServiceUrl(value: string): string | null {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.search && !parsed.hash ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readVisualThemeManifestCache(): VisualThemeManifestCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(VISUAL_THEME_CACHE_KEY);
+    if (!raw) return null;
+    const cache: unknown = JSON.parse(raw);
+    if (!isPlainObject(cache) || typeof cache.serviceUrl !== "string" || !isSafeThemeManifest(cache.manifest)) return null;
+    const serviceUrl = normalizeThemeServiceUrl(cache.serviceUrl);
+    return serviceUrl ? { serviceUrl, manifest: cache.manifest } : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeVisualThemeManifestCache(serviceUrl: string, manifest: VisualThemeManifest) {
+  if (typeof window === "undefined" || !isSafeThemeManifest(manifest)) return;
+  try {
+    window.localStorage.setItem(VISUAL_THEME_CACHE_KEY, JSON.stringify({ serviceUrl, manifest }));
+  } catch {
+    // Storage can be disabled; online themes remain usable for this session.
+  }
+}
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
@@ -3191,20 +3309,129 @@ function AboutScreen({
 }
 
 function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSettings; onFormChange: (next: BackendSettings) => void; actions: Actions }) {
-  const themes = [
-    { id: "cyber-neon", name: "赛博霓虹", detail: "青绿色高对比与科技感" },
-    { id: "glass-lilac", name: "玻璃紫晶", detail: "半透明紫色玻璃质感" },
-    { id: "midnight-blue", name: "午夜深蓝", detail: "沉稳的深蓝工作界面" },
-    { id: "warm-paper", name: "暖调纸感", detail: "温暖低饱和的阅读风格" },
-  ];
+  const [serviceUrl, setServiceUrl] = useState(form.codexAppVisualThemeServiceUrl);
+  const [onlineManifest, setOnlineManifest] = useState<VisualThemeManifest | null>(() => {
+    const cache = readVisualThemeManifestCache();
+    return cache?.serviceUrl === normalizeThemeServiceUrl(form.codexAppVisualThemeServiceUrl) ? cache.manifest : null;
+  });
+  const [serviceStatus, setServiceStatus] = useState(onlineManifest ? "已使用缓存主题" : "使用本地主题");
+  const mountedRef = useRef(true);
+  const requestRef = useRef(0);
+  const initialRefreshRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const refreshOnlineThemes = useCallback(async (inputUrl: string) => {
+    const normalizedUrl = normalizeThemeServiceUrl(inputUrl);
+    if (!normalizedUrl) {
+      setServiceStatus("主题服务地址仅支持 http 或 https");
+      return;
+    }
+
+    const requestId = ++requestRef.current;
+    setServiceStatus("正在刷新在线主题…");
+    try {
+      const response = await fetch(`${normalizedUrl}/v1/themes/manifest`);
+      if (!response.ok) throw new Error("主题服务响应异常");
+      const manifest: unknown = await response.json();
+      if (!isSafeThemeManifest(manifest)) throw new Error("主题清单未通过安全校验");
+      writeVisualThemeManifestCache(normalizedUrl, manifest);
+      if (mountedRef.current && requestRef.current === requestId) {
+        setOnlineManifest(manifest);
+        setServiceStatus("在线主题已刷新");
+      }
+    } catch {
+      if (mountedRef.current && requestRef.current === requestId) {
+        const cache = readVisualThemeManifestCache();
+        const cachedManifest = cache?.serviceUrl === normalizedUrl ? cache.manifest : null;
+        setOnlineManifest(cachedManifest);
+        setServiceStatus(cachedManifest ? "在线主题不可用，已使用缓存主题" : "在线主题不可用，已使用本地主题");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (form.codexAppVisualThemeServiceUrl !== serviceUrl) setServiceUrl(form.codexAppVisualThemeServiceUrl);
+  }, [form.codexAppVisualThemeServiceUrl, serviceUrl]);
+
+  useEffect(() => {
+    const normalizedUrl = normalizeThemeServiceUrl(form.codexAppVisualThemeServiceUrl);
+    if (!normalizedUrl || initialRefreshRef.current !== null) return;
+    initialRefreshRef.current = normalizedUrl;
+    void refreshOnlineThemes(normalizedUrl);
+  }, [form.codexAppVisualThemeServiceUrl, refreshOnlineThemes]);
+
+  const themes = useMemo(() => {
+    const merged = new Map(builtInVisualThemes.map((theme) => [theme.id, theme]));
+    onlineManifest?.themes.forEach((theme) => merged.set(theme.id, theme));
+    return [...merged.values()];
+  }, [onlineManifest]);
+
+  const saveServiceUrl = async () => {
+    const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
+    if (serviceUrl.trim() && !normalizedUrl) {
+      setServiceStatus("主题服务地址仅支持 http 或 https");
+      return;
+    }
+    const next = { ...form, codexAppVisualThemeServiceUrl: normalizedUrl ?? "" };
+    onFormChange(next);
+    setServiceUrl(normalizedUrl ?? "");
+    await actions.saveSettingsValue(next, false);
+    if (mountedRef.current) setServiceStatus("主题服务地址已保存");
+  };
+
   const apply = async (id: string) => {
-    const next = { ...form, codexAppVisualThemeEnabled: true, codexAppVisualThemeId: id };
+    const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
+    if (serviceUrl.trim() && !normalizedUrl) {
+      setServiceStatus("主题服务地址仅支持 http 或 https");
+      return;
+    }
+    const next = {
+      ...form,
+      codexAppVisualThemeServiceUrl: normalizedUrl ?? "",
+      codexAppVisualThemeEnabled: true,
+      codexAppVisualThemeId: id,
+    };
     onFormChange(next);
     await actions.saveSettingsValue(next, false);
     await actions.restart();
   };
+
   return <div className="stack">
-    <Panel><CardHead title="视觉个性化 Pro" detail="主题会在重启 Codex++ 后立即应用；在线主题服务将在后续连接 1Panel。" /><CardContent><div className="theme-grid">{themes.map((item) => <Card key={item.id} className={form.codexAppVisualThemeId === item.id ? "theme-card selected" : "theme-card"}><CardHeader><CardTitle>{item.name}</CardTitle><CardDescription>{item.detail}</CardDescription></CardHeader><CardContent><Button onClick={() => void apply(item.id)}>{form.codexAppVisualThemeId === item.id && form.codexAppVisualThemeEnabled ? "当前使用" : "一键应用"}</Button></CardContent></Card>)}</div><div className="actions"><Button variant="secondary" onClick={() => { const next = { ...form, codexAppVisualThemeEnabled: false }; onFormChange(next); void actions.saveSettingsValue(next, false).then(() => actions.restart()); }}>恢复官方默认</Button></div></CardContent></Panel>
+    <Panel>
+      <CardHead title="视觉个性化 Pro" detail="主题会在重启 Codex++ 后立即应用；可从在线主题服务安全刷新。" />
+      <CardContent>
+        <Field label="主题服务地址">
+          <Input value={serviceUrl} onChange={(event) => setServiceUrl(event.currentTarget.value)} placeholder="http://服务器公网IP:28080" />
+        </Field>
+        <div className="actions">
+          <Button variant="secondary" onClick={() => void saveServiceUrl()}>保存服务地址</Button>
+          <Button variant="secondary" onClick={() => void refreshOnlineThemes(serviceUrl)}>刷新在线主题</Button>
+        </div>
+        <p className="muted">服务状态：{serviceStatus}</p>
+        {onlineManifest ? <p className="muted">在线版本：{onlineManifest.version} · {onlineManifest.updatedAt ?? "未提供更新时间"}</p> : null}
+        {serviceStatus.includes("本地") || serviceStatus.includes("缓存") ? <p className="muted">网络失败时已使用本地/缓存主题。</p> : null}
+        <div className="theme-grid">
+          {themes.map((item) => {
+            const builtInDetail = builtInVisualThemes.find((theme) => theme.id === item.id)?.detail;
+            return <Card key={item.id} className={form.codexAppVisualThemeId === item.id ? "theme-card selected" : "theme-card"}>
+              <CardHeader><CardTitle>{item.name}</CardTitle><CardDescription>{item.detail ?? builtInDetail ?? "在线 Pro 主题"}</CardDescription></CardHeader>
+              <CardContent><Button onClick={() => void apply(item.id)}>{form.codexAppVisualThemeId === item.id && form.codexAppVisualThemeEnabled ? "当前使用" : "一键应用"}</Button></CardContent>
+            </Card>;
+          })}
+        </div>
+        <div className="actions">
+          <Button variant="secondary" onClick={() => {
+            const next = { ...form, codexAppVisualThemeEnabled: false };
+            onFormChange(next);
+            void actions.saveSettingsValue(next, false).then(() => actions.restart());
+          }}>恢复官方默认</Button>
+        </div>
+      </CardContent>
+    </Panel>
   </div>;
 }
 
