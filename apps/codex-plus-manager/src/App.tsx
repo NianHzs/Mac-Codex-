@@ -3331,6 +3331,8 @@ function AboutScreen({
 
 function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSettings; onFormChange: (next: BackendSettings) => void; actions: Actions }) {
   const [serviceUrl, setServiceUrl] = useState(form.codexAppVisualThemeServiceUrl);
+  const serviceUrlDraftRef = useRef(form.codexAppVisualThemeServiceUrl);
+  const lastSavedThemeServiceUrlRef = useRef(form.codexAppVisualThemeServiceUrl);
   const [onlineManifest, setOnlineManifest] = useState<VisualThemeManifest | null>(() => {
     return readVisualThemeManifestCache(form.codexAppVisualThemeServiceUrl);
   });
@@ -3339,6 +3341,10 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
   const requestRef = useRef(0);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const initialRefreshRef = useRef<string | null>(null);
+  const setServiceUrlDraft = (next: string) => {
+    serviceUrlDraftRef.current = next;
+    setServiceUrl(next);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -3382,7 +3388,9 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
   }, []);
 
   useEffect(() => {
-    setServiceUrl(form.codexAppVisualThemeServiceUrl);
+    const savedUrl = form.codexAppVisualThemeServiceUrl;
+    if (serviceUrlDraftRef.current === lastSavedThemeServiceUrlRef.current) setServiceUrlDraft(savedUrl);
+    lastSavedThemeServiceUrlRef.current = savedUrl;
   }, [form.codexAppVisualThemeServiceUrl]);
 
   useEffect(() => {
@@ -3406,7 +3414,7 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
     }
     const next = { ...form, codexAppVisualThemeServiceUrl: normalizedUrl ?? "" };
     onFormChange(next);
-    setServiceUrl(normalizedUrl ?? "");
+    setServiceUrlDraft(normalizedUrl ?? "");
     await actions.saveSettingsValue(next, false);
     if (mountedRef.current) setServiceStatus("主题服务地址已保存");
   };
@@ -3433,7 +3441,7 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
       <CardHead title="视觉个性化 Pro" detail="主题会在重启 Codex++ 后立即应用；可从在线主题服务安全刷新。" />
       <CardContent>
         <Field label="主题服务地址">
-          <Input value={serviceUrl} onChange={(event) => setServiceUrl(event.currentTarget.value)} placeholder="http://服务器公网IP:28080" />
+          <Input value={serviceUrl} onChange={(event) => setServiceUrlDraft(event.currentTarget.value)} placeholder="http://服务器公网IP:28080" />
         </Field>
         <div className="actions">
           <Button variant="secondary" onClick={() => void saveServiceUrl()}>保存服务地址</Button>
