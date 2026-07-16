@@ -1212,6 +1212,23 @@
     }
   }
 
+  const codeworkVisualThemeCss = {
+    "cyber-neon": "body{background:radial-gradient(circle at top right,#153c4a,transparent 32%),#090f15!important}button{border-radius:10px!important}",
+    "glass-lilac": "body{background:radial-gradient(circle at top left,#4f2b83,transparent 36%),#120d20!important}button{border-radius:12px!important}",
+    "midnight-blue": "body{background:linear-gradient(135deg,#07111f,#0d2340)!important}button{border-radius:8px!important}",
+    "warm-paper": "body{background:linear-gradient(135deg,#211810,#342719)!important}button{border-radius:12px!important}",
+  };
+  function applyCodeworkVisualTheme() {
+    const id = "codework-visual-theme-style";
+    const existing = document.getElementById(id);
+    const css = codexPlusBackendSettings.codexAppVisualThemeEnabled === true ? codeworkVisualThemeCss[String(codexPlusBackendSettings.codexAppVisualThemeId || "cyber-neon")] : "";
+    if (!css) { existing?.remove(); return; }
+    const style = existing || document.createElement("style");
+    style.id = id;
+    style.textContent = css;
+    if (!existing) document.documentElement.appendChild(style);
+  }
+
   function setCodexPlusSetting(key, value) {
     const backendKey = codexPlusBackendSettingMap[key];
     if (backendKey) {
@@ -2104,6 +2121,7 @@
       }
       codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
       codexPlusBackendSettingsLoaded = true;
+      applyCodeworkVisualTheme();
       refreshCodexPlusBackendToggles();
       return true;
     } catch (_) {
@@ -2128,11 +2146,13 @@
     const seq = ++codexPlusBackendSettingsSeq;
     codexPlusBackendSettings = { ...codexPlusBackendSettings, [key]: value };
     codexPlusBackendSettingsLoaded = true;
+    applyCodeworkVisualTheme();
     refreshCodexPlusBackendToggles();
     try {
       const settings = await postJson("/settings/set", { [key]: value });
       if (seq === codexPlusBackendSettingsSeq) {
         codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
+        applyCodeworkVisualTheme();
       }
     } finally {
       refreshCodexPlusBackendToggles();

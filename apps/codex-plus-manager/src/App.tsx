@@ -34,6 +34,7 @@ import {
   MessageCircle,
   FileCode2,
   Moon,
+  Palette,
   Network,
   Power,
   PowerOff,
@@ -176,6 +177,8 @@ type BackendSettings = {
   codexAppImageOverlayPath: string;
   codexAppImageOverlayOpacity: number;
   codexAppImageOverlayFitMode: ImageOverlayFitMode;
+  codexAppVisualThemeEnabled: boolean;
+  codexAppVisualThemeId: string;
   codexGoalsEnabled: boolean;
   launchMode: LaunchMode;
   relayBaseUrl: string;
@@ -606,7 +609,7 @@ function syncMarketInstalledState(current: ScriptMarketResult | null, userScript
   };
 }
 
-type Route = "overview" | "relay" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "sessions" | "context" | "enhance" | "visualTheme" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
@@ -615,6 +618,7 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   { id: "sessions", label: t("会话管理"), icon: MessageCircle },
   { id: "context", label: t("工具与插件"), icon: Network },
   { id: "enhance", label: t("Codex增强"), icon: Hammer },
+  { id: "visualTheme", label: "视觉个性化", icon: Palette, badge: "PRO" },
   { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink },
   { id: "userScripts", label: t("脚本市场"), icon: FileCode2 },
   { id: "maintenance", label: t("安装维护"), icon: Wrench },
@@ -666,6 +670,8 @@ const defaultSettings: BackendSettings = {
   codexAppImageOverlayPath: "",
   codexAppImageOverlayOpacity: 35,
   codexAppImageOverlayFitMode: "fit",
+  codexAppVisualThemeEnabled: false,
+  codexAppVisualThemeId: "cyber-neon",
   codexGoalsEnabled: false,
   launchMode: "patch",
   relayBaseUrl: "",
@@ -2013,6 +2019,7 @@ export function App() {
               actions={actions}
             />
           ) : null}
+          {route === "visualTheme" ? <VisualThemeScreen form={settingsForm} onFormChange={setSettingsForm} actions={actions} /> : null}
           {route === "zedRemote" ? (
             <ZedRemoteScreen projects={zedRemoteProjects} form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
           ) : null}
@@ -3179,6 +3186,24 @@ function AboutScreen({
       <DiagnosticsPanel diagnostics={diagnostics} actions={actions} />
     </>
   );
+}
+
+function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSettings; onFormChange: (next: BackendSettings) => void; actions: Actions }) {
+  const themes = [
+    { id: "cyber-neon", name: "赛博霓虹", detail: "青绿色高对比与科技感" },
+    { id: "glass-lilac", name: "玻璃紫晶", detail: "半透明紫色玻璃质感" },
+    { id: "midnight-blue", name: "午夜深蓝", detail: "沉稳的深蓝工作界面" },
+    { id: "warm-paper", name: "暖调纸感", detail: "温暖低饱和的阅读风格" },
+  ];
+  const apply = async (id: string) => {
+    const next = { ...form, codexAppVisualThemeEnabled: true, codexAppVisualThemeId: id };
+    onFormChange(next);
+    await actions.saveSettingsValue(next, false);
+    await actions.restart();
+  };
+  return <div className="stack">
+    <Panel><CardHead title="视觉个性化 Pro" detail="主题会在重启 Codex++ 后立即应用；在线主题服务将在后续连接 1Panel。" /><CardContent><div className="theme-grid">{themes.map((item) => <Card key={item.id} className={form.codexAppVisualThemeId === item.id ? "theme-card selected" : "theme-card"}><CardHeader><CardTitle>{item.name}</CardTitle><CardDescription>{item.detail}</CardDescription></CardHeader><CardContent><Button onClick={() => void apply(item.id)}>{form.codexAppVisualThemeId === item.id && form.codexAppVisualThemeEnabled ? "当前使用" : "一键应用"}</Button></CardContent></Card>)}</div><div className="actions"><Button variant="secondary" onClick={() => { const next = { ...form, codexAppVisualThemeEnabled: false }; onFormChange(next); void actions.saveSettingsValue(next, false).then(() => actions.restart()); }}>恢复官方默认</Button></div></CardContent></Panel>
+  </div>;
 }
 
 function SettingsScreen({
@@ -5025,6 +5050,7 @@ function routeSubtitle(route: Route) {
     userScripts: t("内置和用户自定义脚本清单"),
     maintenance: t("入口安装、修复、Watcher 与手动启动"),
     about: t("版本信息、上游源码、日志与诊断"),
+    visualTheme: "一键切换 Codex 的视觉主题与界面风格",
     settings: t("主题和启动参数"),
   };
   return subtitles[route];

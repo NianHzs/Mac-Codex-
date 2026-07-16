@@ -497,3 +497,24 @@ fn codework_installer_is_independent_and_packages_notices() {
     assert!(notices.contains("MIT License"));
     assert!(notices.contains("https://github.com/BigPizzaV3/CodexPlusPlus"));
 }
+
+#[test]
+fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
+        .expect("read manager app");
+    let renderer = std::fs::read_to_string(manifest_dir.join("../../../assets/inject/renderer-inject.js"))
+        .expect("read Codex renderer injector");
+    let settings = std::fs::read_to_string(
+        manifest_dir.join("../../../crates/codex-plus-core/src/settings.rs"),
+    )
+    .expect("read core settings");
+
+    assert!(app.contains("id: \"visualTheme\""));
+    assert!(app.contains("VisualThemeScreen"));
+    assert!(renderer.contains("applyCodeworkVisualTheme"));
+    assert!(renderer.contains("codexAppVisualThemeEnabled"));
+    assert!(renderer.contains("codexAppVisualThemeId"));
+    assert!(settings.contains("codex_app_visual_theme_enabled"));
+    assert!(settings.contains("codex_app_visual_theme_id"));
+}
