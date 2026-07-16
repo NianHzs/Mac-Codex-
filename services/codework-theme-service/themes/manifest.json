@@ -2,9 +2,33 @@
   "version": "1.0.0",
   "updatedAt": "2026-07-16T00:00:00Z",
   "themes": [
-    { "id": "cyber-neon", "name": "赛博霓虹", "tier": "pro", "version": "1.0.0" },
-    { "id": "glass-lilac", "name": "玻璃紫晶", "tier": "pro", "version": "1.0.0" },
-    { "id": "midnight-blue", "name": "午夜深蓝", "tier": "pro", "version": "1.0.0" },
-    { "id": "warm-paper", "name": "暖调纸感", "tier": "pro", "version": "1.0.0" }
+    {
+      "id": "cyber-neon",
+      "name": "赛博霓虹",
+      "tier": "pro",
+      "version": "1.0.0",
+      "tokens": { "background": "#0B1020", "surface": "#141B34", "accent": "#00E5FF", "border": "#2A3C66", "text": "#E6F1FF", "radius": 8, "fontScale": 1.0 }
+    },
+    {
+      "id": "glass-lilac",
+      "name": "玻璃紫晶",
+      "tier": "pro",
+      "version": "1.0.0",
+      "tokens": { "background": "#1A1427", "surface": "#2B1D45", "accent": "#C084FC", "border": "#5B3A82", "text": "#F5EFFF", "radius": 16, "fontScale": 1.0 }
+    },
+    {
+      "id": "midnight-blue",
+      "name": "午夜深蓝",
+      "tier": "pro",
+      "version": "1.0.0",
+      "tokens": { "background": "#0B162A", "surface": "#10233F", "accent": "#4DA3FF", "border": "#294B73", "text": "#EAF3FF", "radius": 6, "fontScale": 0.95 }
+    },
+    {
+      "id": "warm-paper",
+      "name": "暖调纸感",
+      "tier": "pro",
+      "version": "1.0.0",
+      "tokens": { "background": "#F4EBDD", "surface": "#FFF9F0", "accent": "#B66A3C", "border": "#D7BFA5", "text": "#3C2B20", "radius": 12, "fontScale": 1.05 }
+    }
   ]
 }

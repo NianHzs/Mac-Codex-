@@ -179,6 +179,7 @@ type BackendSettings = {
   codexAppImageOverlayFitMode: ImageOverlayFitMode;
   codexAppVisualThemeEnabled: boolean;
   codexAppVisualThemeId: string;
+  codexAppVisualThemeServiceUrl: string;
   codexGoalsEnabled: boolean;
   launchMode: LaunchMode;
   relayBaseUrl: string;
@@ -672,6 +673,7 @@ const defaultSettings: BackendSettings = {
   codexAppImageOverlayFitMode: "fit",
   codexAppVisualThemeEnabled: false,
   codexAppVisualThemeId: "cyber-neon",
+  codexAppVisualThemeServiceUrl: "",
   codexGoalsEnabled: false,
   launchMode: "patch",
   relayBaseUrl: "",

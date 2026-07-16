@@ -523,6 +523,12 @@ fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
 fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = manifest_dir.join("../../..");
+    let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
+        .expect("read manager app");
+    let settings = std::fs::read_to_string(
+        manifest_dir.join("../../../crates/codex-plus-core/src/settings.rs"),
+    )
+    .expect("read core settings");
     let compose = std::fs::read_to_string(root.join("services/codework-theme-service/compose.yaml"))
         .expect("read theme service compose file");
     let server = std::fs::read_to_string(root.join("services/codework-theme-service/server.mjs"))
@@ -533,6 +539,10 @@ fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
     assert!(compose.contains("28080:28080"));
     assert!(server.contains("/v1/themes/manifest"));
     assert!(server.contains("Access-Control-Allow-Origin"));
+    assert!(app.contains("codexAppVisualThemeServiceUrl"));
+    assert!(settings.contains("codex_app_visual_theme_service_url"));
     assert!(themes.contains("cyber-neon"));
     assert!(themes.contains("glass-lilac"));
+    assert!(themes.contains("\"tokens\""));
+    assert!(themes.contains("\"background\""));
 }

@@ -299,6 +299,8 @@ pub struct BackendSettings {
     pub codex_app_visual_theme_enabled: bool,
     #[serde(rename = "codexAppVisualThemeId", default)]
     pub codex_app_visual_theme_id: String,
+    #[serde(rename = "codexAppVisualThemeServiceUrl", default)]
+    pub codex_app_visual_theme_service_url: String,
     #[serde(rename = "codexGoalsEnabled", default)]
     pub codex_goals_enabled: bool,
     #[serde(rename = "launchMode", default)]
@@ -371,6 +373,7 @@ impl Default for BackendSettings {
             codex_app_image_overlay_fit_mode: default_image_overlay_fit_mode(),
             codex_app_visual_theme_enabled: false,
             codex_app_visual_theme_id: "cyber-neon".to_string(),
+            codex_app_visual_theme_service_url: String::new(),
             codex_goals_enabled: false,
             launch_mode: LaunchMode::Patch,
             relay_base_url: default_relay_base_url(),
