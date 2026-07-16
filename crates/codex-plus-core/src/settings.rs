@@ -912,6 +912,15 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
             Value::String(normalize_image_overlay_fit_mode(value)),
         );
     }
+    if let Some(value) = source
+        .get("codexAppVisualThemeServiceUrl")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppVisualThemeServiceUrl".to_string(),
+            Value::String(value.trim().trim_end_matches('/').to_string()),
+        );
+    }
     if let Some(value) = source.get("codexGoalsEnabled").and_then(Value::as_bool) {
         target.insert("codexGoalsEnabled".to_string(), Value::Bool(value));
     }
@@ -1834,6 +1843,27 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(updated.codex_app_image_overlay_opacity, 42);
         assert_eq!(updated.codex_app_image_overlay_fit_mode, "fill");
         assert_eq!(store.load().unwrap(), updated);
+    }
+
+    #[test]
+    fn settings_store_partial_update_persists_visual_theme_service_url() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+
+        let updated = store
+            .update(json!({
+                "codexAppVisualThemeServiceUrl": " https://themes.example.test/v1/ "
+            }))
+            .unwrap();
+
+        assert_eq!(
+            updated.codex_app_visual_theme_service_url,
+            "https://themes.example.test/v1"
+        );
+        assert_eq!(
+            store.load().unwrap().codex_app_visual_theme_service_url,
+            "https://themes.example.test/v1"
+        );
     }
 
     #[test]

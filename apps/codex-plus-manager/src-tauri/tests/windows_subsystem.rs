@@ -541,8 +541,33 @@ fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
     assert!(server.contains("Access-Control-Allow-Origin"));
     assert!(app.contains("codexAppVisualThemeServiceUrl"));
     assert!(settings.contains("codex_app_visual_theme_service_url"));
-    assert!(themes.contains("cyber-neon"));
-    assert!(themes.contains("glass-lilac"));
-    assert!(themes.contains("\"tokens\""));
-    assert!(themes.contains("\"background\""));
+    let manifest: serde_json::Value = serde_json::from_str(&themes).expect("parse theme manifest");
+    assert_eq!(manifest["version"], "1.0.0");
+    let themes = manifest["themes"].as_array().expect("themes array");
+    assert_eq!(themes.len(), 4);
+
+    let mut theme_ids = std::collections::HashSet::new();
+    for theme in themes {
+        let id = theme["id"].as_str().expect("theme id");
+        assert!(theme_ids.insert(id), "theme IDs must be unique");
+
+        let tokens = theme["tokens"].as_object().expect("theme tokens");
+        for key in ["background", "surface", "accent", "border", "text"] {
+            let color = tokens[key].as_str().expect("token color");
+            assert!(
+                color.len() == 7
+                    && color.starts_with('#')
+                    && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "{key} must be a six-digit hex color"
+            );
+        }
+
+        let radius = tokens["radius"].as_i64().expect("token radius");
+        assert!((0..=32).contains(&radius), "radius must be between 0 and 32");
+        let font_scale = tokens["fontScale"].as_f64().expect("token fontScale");
+        assert!(
+            (0.8..=1.3).contains(&font_scale),
+            "fontScale must be between 0.8 and 1.3"
+        );
+    }
 }
