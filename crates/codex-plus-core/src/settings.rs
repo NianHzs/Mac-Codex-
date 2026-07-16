@@ -391,6 +391,25 @@ impl Default for BackendSettings {
 
 impl BackendSettings {
     pub fn active_relay_profile(&self) -> RelayProfile {
+        if self.active_relay_id == "default"
+            && self.relay_profiles.len() == 1
+            && self.relay_profiles[0].id == "default"
+            && (!self.relay_api_key.is_empty() || self.relay_base_url != default_relay_base_url())
+        {
+            let mut profile = self.relay_profiles[0].clone();
+            profile.base_url = if self.relay_base_url.is_empty() {
+                default_relay_base_url()
+            } else {
+                self.relay_base_url.clone()
+            };
+            profile.upstream_base_url = profile.base_url.clone();
+            profile.api_key = self.relay_api_key.clone();
+            profile.protocol = RelayProtocol::Responses;
+            profile.relay_mode = RelayMode::MixedApi;
+            profile.official_mix_api_key = true;
+            return profile;
+        }
+
         if self.active_relay_id == default_active_relay_id()
             && self.relay_profiles.len() == 1
             && self.relay_profiles[0] == RelayProfile::default()
@@ -2116,6 +2135,35 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(active.api_key, "sk-legacy");
         assert_eq!(active.relay_mode, RelayMode::PureApi);
         assert!(!active.official_mix_api_key);
+    }
+
+    #[test]
+    fn active_relay_profile_preserves_legacy_default_id_with_global_credentials() {
+        let settings: BackendSettings = serde_json::from_str(
+            r#"{
+                "relayBaseUrl":"https://legacy.example/v1",
+                "relayApiKey":"sk-legacy",
+                "activeRelayId":"default",
+                "relayProfiles":[{
+                    "id":"default",
+                    "name":"默认中转",
+                    "relayMode":"official",
+                    "officialMixApiKey":false
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let active = settings.active_relay_profile();
+
+        assert_eq!(active.id, "default");
+        assert_eq!(active.name, "默认中转");
+        assert_eq!(active.base_url, "https://legacy.example/v1");
+        assert_eq!(active.upstream_base_url, "https://legacy.example/v1");
+        assert_eq!(active.api_key, "sk-legacy");
+        assert_eq!(active.protocol, RelayProtocol::Responses);
+        assert_eq!(active.relay_mode, RelayMode::MixedApi);
+        assert!(active.official_mix_api_key);
     }
 
     #[test]

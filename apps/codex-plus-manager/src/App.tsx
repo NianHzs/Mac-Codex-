@@ -6015,31 +6015,41 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
         )
       : [
           {
-            id: settings.activeRelayId || "default",
-            name: t("默认中转"),
-            model: "",
-            baseUrl: settings.relayBaseUrl || defaultSettings.relayBaseUrl,
-            upstreamBaseUrl: settings.relayBaseUrl || defaultSettings.relayBaseUrl,
+            id: "codework-ai",
+            name: "Codework AI 官方中转",
+            model: "gpt-5.6-sol",
+            baseUrl: CODEWORK_API_BASE_URL,
+            upstreamBaseUrl: CODEWORK_API_BASE_URL,
             apiKey: settings.relayApiKey || "",
             protocol: "responses" as RelayProtocol,
-            relayMode: "official" as RelayMode,
+            relayMode: "pureApi" as RelayMode,
             officialMixApiKey: false,
-            testModel: "",
-            configContents: "",
+            testModel: "gpt-5.6-sol",
+            configContents: `model_provider = "custom"
+model = "gpt-5.6-sol"
+
+[model_providers]
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "${CODEWORK_API_BASE_URL}"
+`,
             authContents: "",
             useCommonConfig: true,
             contextSelection: defaultContextSelection,
             contextSelectionInitialized: true,
             contextWindow: "",
             autoCompactLimit: "",
-            modelList: "",
+            modelList: "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5",
             modelWindows: "",
             userAgent: "",
           },
         ];
   const activeRelayId = profiles.some((profile) => profile.id === settings.activeRelayId)
     ? settings.activeRelayId
-    : profiles[0]?.id || "default";
+    : profiles[0]?.id || defaultSettings.activeRelayId;
   return syncLegacyRelayFields({
     ...defaultSettings,
     ...settings,

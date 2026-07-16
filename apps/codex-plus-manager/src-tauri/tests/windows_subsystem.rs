@@ -107,6 +107,11 @@ fn codework_homepage_and_provider_preset_are_present() {
         .expect("read Codework constants");
     let presets = std::fs::read_to_string(manifest_dir.join("../src/presets.ts"))
         .expect("read provider presets");
+    let normalize_settings = app
+        .split("function normalizeSettings")
+        .nth(1)
+        .and_then(|source| source.split("function clampNumber").next())
+        .expect("read normalizeSettings source");
 
     assert!(app.contains("CODEWORK_PROVIDER_NAME"));
     assert!(app.contains("CODEWORK_REGISTER_URL"));
@@ -115,6 +120,12 @@ fn codework_homepage_and_provider_preset_are_present() {
     assert!(app.contains("name: \"Codework AI 官方中转\""));
     assert!(app.contains("gpt-5.6-terra"));
     assert!(app.contains("relayMode: \"pureApi\""));
+    assert!(normalize_settings.contains("id: \"codework-ai\""));
+    assert!(normalize_settings.contains("name: \"Codework AI 官方中转\""));
+    assert!(normalize_settings.contains("baseUrl: CODEWORK_API_BASE_URL"));
+    assert!(normalize_settings.contains("upstreamBaseUrl: CODEWORK_API_BASE_URL"));
+    assert!(normalize_settings.contains("relayMode: \"pureApi\""));
+    assert!(normalize_settings.contains("modelList: \"gpt-5.6-sol\\ngpt-5.6-terra\\ngpt-5.6-luna\\ngpt-5.5\""));
     assert!(codework.contains("Codework AI 内部技术应用"));
     assert!(codework.contains("https://gptproxy.site/register?aff=Kw5y"));
     assert!(presets.contains("id: \"codework-ai\""));
