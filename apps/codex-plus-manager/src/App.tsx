@@ -638,10 +638,7 @@ type VisualThemeManifest = {
   themes: VisualThemeItem[];
 };
 
-type VisualThemeManifestCache = {
-  serviceUrl: string;
-  manifest: VisualThemeManifest;
-};
+type VisualThemeManifestCache = Record<string, VisualThemeManifest>;
 
 const VISUAL_THEME_CACHE_KEY = "codework-theme-manifest-cache";
 const visualThemeTokenKeys = ["background", "surface", "accent", "border", "text", "radius", "fontScale"] as const;
@@ -676,17 +673,25 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return Object.keys(value).every((key) => allowed.includes(key));
 }
 
+function isSafeThemeText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 80 && !/[\u0000-\u001F\u007F-\u009F]/.test(value);
+}
+
+function isSafeThemeVersion(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$/.test(value);
+}
+
 function isSafeThemeManifest(value: unknown): value is VisualThemeManifest {
   if (!isPlainObject(value) || !hasOnlyKeys(value, visualThemeManifestKeys)) return false;
-  if (typeof value.version !== "string" || !value.version.trim() || !Array.isArray(value.themes)) return false;
-  if (value.updatedAt !== undefined && (typeof value.updatedAt !== "string" || !value.updatedAt.trim())) return false;
+  if (!isSafeThemeVersion(value.version) || !Array.isArray(value.themes)) return false;
+  if (value.updatedAt !== undefined && !isSafeThemeText(value.updatedAt)) return false;
 
   return value.themes.every((theme) => {
     if (!isPlainObject(theme) || !hasOnlyKeys(theme, visualThemeItemKeys)) return false;
     if (typeof theme.id !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(theme.id)) return false;
-    if (typeof theme.name !== "string" || !theme.name.trim()) return false;
-    if (theme.detail !== undefined && (typeof theme.detail !== "string" || !theme.detail.trim())) return false;
-    if (theme.tier !== "pro" || typeof theme.version !== "string" || !theme.version.trim()) return false;
+    if (!isSafeThemeText(theme.name)) return false;
+    if (theme.detail !== undefined && !isSafeThemeText(theme.detail)) return false;
+    if (theme.tier !== "pro" || !isSafeThemeVersion(theme.version)) return false;
     if (!isPlainObject(theme.tokens) || !hasOnlyKeys(theme.tokens, visualThemeTokenKeys)) return false;
 
     const tokens = theme.tokens;
@@ -698,34 +703,50 @@ function isSafeThemeManifest(value: unknown): value is VisualThemeManifest {
 }
 
 function normalizeThemeServiceUrl(value: string): string | null {
-  const trimmed = value.trim().replace(/\/+$/, "");
+  const trimmed = value.trim();
   if (!trimmed) return null;
   try {
     const parsed = new URL(trimmed);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.search && !parsed.hash ? trimmed : null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    parsed.hash = "";
+    parsed.search = "";
+    parsed.username = "";
+    parsed.password = "";
+    const pathname = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.host}${pathname}`;
   } catch {
     return null;
   }
 }
 
-function readVisualThemeManifestCache(): VisualThemeManifestCache | null {
+function readVisualThemeManifestCache(serviceUrl: string): VisualThemeManifest | null {
   if (typeof window === "undefined") return null;
+  const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
+  if (!normalizedUrl) return null;
   try {
     const raw = window.localStorage.getItem(VISUAL_THEME_CACHE_KEY);
     if (!raw) return null;
     const cache: unknown = JSON.parse(raw);
-    if (!isPlainObject(cache) || typeof cache.serviceUrl !== "string" || !isSafeThemeManifest(cache.manifest)) return null;
-    const serviceUrl = normalizeThemeServiceUrl(cache.serviceUrl);
-    return serviceUrl ? { serviceUrl, manifest: cache.manifest } : null;
+    if (!isPlainObject(cache) || !isSafeThemeManifest(cache[normalizedUrl])) return null;
+    return cache[normalizedUrl];
   } catch {
     return null;
   }
 }
 
 function writeVisualThemeManifestCache(serviceUrl: string, manifest: VisualThemeManifest) {
-  if (typeof window === "undefined" || !isSafeThemeManifest(manifest)) return;
+  const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
+  if (typeof window === "undefined" || !normalizedUrl || !isSafeThemeManifest(manifest)) return;
   try {
-    window.localStorage.setItem(VISUAL_THEME_CACHE_KEY, JSON.stringify({ serviceUrl, manifest }));
+    const raw: unknown = JSON.parse(window.localStorage.getItem(VISUAL_THEME_CACHE_KEY) || "{}");
+    const cache: VisualThemeManifestCache = {};
+    if (isPlainObject(raw)) {
+      Object.entries(raw).forEach(([url, item]) => {
+        if (normalizeThemeServiceUrl(url) === url && isSafeThemeManifest(item)) cache[url] = item;
+      });
+    }
+    cache[normalizedUrl] = manifest;
+    window.localStorage.setItem(VISUAL_THEME_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Storage can be disabled; online themes remain usable for this session.
   }
@@ -3311,51 +3332,58 @@ function AboutScreen({
 function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSettings; onFormChange: (next: BackendSettings) => void; actions: Actions }) {
   const [serviceUrl, setServiceUrl] = useState(form.codexAppVisualThemeServiceUrl);
   const [onlineManifest, setOnlineManifest] = useState<VisualThemeManifest | null>(() => {
-    const cache = readVisualThemeManifestCache();
-    return cache?.serviceUrl === normalizeThemeServiceUrl(form.codexAppVisualThemeServiceUrl) ? cache.manifest : null;
+    return readVisualThemeManifestCache(form.codexAppVisualThemeServiceUrl);
   });
   const [serviceStatus, setServiceStatus] = useState(onlineManifest ? "已使用缓存主题" : "使用本地主题");
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const initialRefreshRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      refreshAbortRef.current?.abort();
+    };
   }, []);
 
   const refreshOnlineThemes = useCallback(async (inputUrl: string) => {
+    const requestId = ++requestRef.current;
+    refreshAbortRef.current?.abort();
     const normalizedUrl = normalizeThemeServiceUrl(inputUrl);
     if (!normalizedUrl) {
       setServiceStatus("主题服务地址仅支持 http 或 https");
       return;
     }
 
-    const requestId = ++requestRef.current;
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     setServiceStatus("正在刷新在线主题…");
     try {
-      const response = await fetch(`${normalizedUrl}/v1/themes/manifest`);
+      const response = await fetch(`${normalizedUrl}/v1/themes/manifest`, { signal: controller.signal });
       if (!response.ok) throw new Error("主题服务响应异常");
       const manifest: unknown = await response.json();
       if (!isSafeThemeManifest(manifest)) throw new Error("主题清单未通过安全校验");
-      writeVisualThemeManifestCache(normalizedUrl, manifest);
       if (mountedRef.current && requestRef.current === requestId) {
+        writeVisualThemeManifestCache(normalizedUrl, manifest);
         setOnlineManifest(manifest);
         setServiceStatus("在线主题已刷新");
       }
     } catch {
-      if (mountedRef.current && requestRef.current === requestId) {
-        const cache = readVisualThemeManifestCache();
-        const cachedManifest = cache?.serviceUrl === normalizedUrl ? cache.manifest : null;
+      if (!controller.signal.aborted && mountedRef.current && requestRef.current === requestId) {
+        const cachedManifest = readVisualThemeManifestCache(normalizedUrl);
         setOnlineManifest(cachedManifest);
         setServiceStatus(cachedManifest ? "在线主题不可用，已使用缓存主题" : "在线主题不可用，已使用本地主题");
       }
+    } finally {
+      if (requestRef.current === requestId && refreshAbortRef.current === controller) refreshAbortRef.current = null;
     }
   }, []);
 
   useEffect(() => {
-    if (form.codexAppVisualThemeServiceUrl !== serviceUrl) setServiceUrl(form.codexAppVisualThemeServiceUrl);
-  }, [form.codexAppVisualThemeServiceUrl, serviceUrl]);
+    setServiceUrl(form.codexAppVisualThemeServiceUrl);
+  }, [form.codexAppVisualThemeServiceUrl]);
 
   useEffect(() => {
     const normalizedUrl = normalizeThemeServiceUrl(form.codexAppVisualThemeServiceUrl);
