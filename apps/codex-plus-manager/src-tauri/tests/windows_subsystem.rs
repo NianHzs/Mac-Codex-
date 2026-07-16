@@ -518,3 +518,21 @@ fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
     assert!(settings.contains("codex_app_visual_theme_enabled"));
     assert!(settings.contains("codex_app_visual_theme_id"));
 }
+
+#[test]
+fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = manifest_dir.join("../../..");
+    let compose = std::fs::read_to_string(root.join("services/codework-theme-service/compose.yaml"))
+        .expect("read theme service compose file");
+    let server = std::fs::read_to_string(root.join("services/codework-theme-service/server.mjs"))
+        .expect("read theme service server");
+    let themes = std::fs::read_to_string(root.join("services/codework-theme-service/themes/manifest.json"))
+        .expect("read theme manifest");
+
+    assert!(compose.contains("28080:28080"));
+    assert!(server.contains("/v1/themes/manifest"));
+    assert!(server.contains("Access-Control-Allow-Origin"));
+    assert!(themes.contains("cyber-neon"));
+    assert!(themes.contains("glass-lilac"));
+}

@@ -1,0 +1,9 @@
+services:
+  codework-theme-service:
+    build: .
+    container_name: codework-theme-service
+    restart: unless-stopped
+    ports:
+      - "28080:28080"
+    environment:
+      PORT: "28080"

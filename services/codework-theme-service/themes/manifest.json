@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-07-16T00:00:00Z",
+  "themes": [
+    { "id": "cyber-neon", "name": "赛博霓虹", "tier": "pro", "version": "1.0.0" },
+    { "id": "glass-lilac", "name": "玻璃紫晶", "tier": "pro", "version": "1.0.0" },
+    { "id": "midnight-blue", "name": "午夜深蓝", "tier": "pro", "version": "1.0.0" },
+    { "id": "warm-paper", "name": "暖调纸感", "tier": "pro", "version": "1.0.0" }
+  ]
+}
