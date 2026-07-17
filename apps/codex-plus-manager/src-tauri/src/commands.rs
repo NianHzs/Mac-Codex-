@@ -1,20 +1,34 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use codex_plus_core::install::SILENT_BINARY;
 use codex_plus_core::models::{DeleteResult, SessionRef};
 use codex_plus_core::script_market::{self, MarketScript, ScriptMarketManifest};
+use codex_plus_core::skill_market::{self, MarketSkill, SkillMarketManifest};
 use codex_plus_core::settings::{BackendSettings, RelayProfile, SettingsStore};
 use codex_plus_core::status::{LaunchStatus, StatusStore};
 use codex_plus_core::user_scripts::UserScriptManager;
 use codex_plus_core::zed_remote::{ZedOpenStrategy, ZedRemoteProject};
-use serde::Serialize;
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tauri::Emitter;
+use url::Url;
 
 use crate::install::{self, InstallActionResult, InstallOptions};
+
+const LOTTERY_MEMBER_SERVICE_URL: &str = "http://115.190.199.191:20080";
+const CODEWORK_RELEASE_MANIFEST_URL: &str =
+    "http://115.190.199.191:20080/downloads/codework-ai-client-windows.json";
+const CODEWORK_RELEASE_PROGRESS_EVENT: &str = "codework-release-progress";
+const CHATGPT_INSTALL_PROGRESS_EVENT: &str = "chatgpt-install-progress";
+const CHATGPT_STORE_PRODUCT_IDS: &[&str] = &["9PLM9XGG6VKS", "9NT1R1C2HH7J"];
+const PRIVATE_CHAT_ATTACHMENT_MAX_BYTES: usize = 30 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult<T>
@@ -30,6 +44,34 @@ where
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionPayload {
     pub version: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeworkReleaseManifest {
+    version: String,
+    download_url: String,
+    #[serde(default)]
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeworkReleasePayload {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub download_url: Option<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatGptInstallPayload {
+    pub installed: bool,
+    pub winget_available: bool,
+    pub store_product_id: Option<String>,
+    pub shortcut_created: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,6 +185,543 @@ pub struct RelayPayload {
     pub requires_openai_auth: bool,
     pub has_bearer_token: bool,
     pub backup_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LotteryMemberProfilePayload {
+    pub user_id: String,
+    pub username: String,
+    pub tier: String,
+    pub active_role: String,
+    pub actual_admin: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LotteryMemberCampaignPayload {
+    pub id: String,
+    pub title: String,
+    pub ends_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LotteryMemberActivityPayload {
+    pub campaign: Option<LotteryMemberCampaignPayload>,
+    pub remaining_chances: i64,
+    pub portal_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LotteryMemberLoginWire {
+    access_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LotteryMemberProfileWire {
+    user: LotteryMemberUserWire,
+    entitlements: LotteryMemberEntitlementsWire,
+    #[serde(default)]
+    identity: Option<LotteryMemberIdentityWire>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LotteryMemberUserWire {
+    id: String,
+    username: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LotteryMemberEntitlementsWire {
+    tier: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LotteryMemberIdentityWire {
+    active_role: Option<String>,
+    actual_admin: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LotteryMemberActivityWire {
+    campaign: Option<LotteryMemberCampaignWire>,
+    remaining_chances: i64,
+    portal_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LotteryMemberPortalLinkWire {
+    portal_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LotteryMemberCampaignWire {
+    id: String,
+    title: String,
+    ends_at: i64,
+}
+
+fn parse_lottery_member_profile(payload: &str) -> anyhow::Result<LotteryMemberProfilePayload> {
+    let wire: LotteryMemberProfileWire = serde_json::from_str(payload)?;
+    let user_id = wire.user.id.trim().to_string();
+    let username = wire.user.username.trim().to_string();
+    let tier = wire.entitlements.tier.trim().to_ascii_lowercase();
+    if user_id.is_empty() || username.is_empty() {
+        anyhow::bail!("会员身份信息不完整");
+    }
+    if !matches!(tier.as_str(), "vip" | "supreme") {
+        anyhow::bail!("会员等级无效");
+    }
+    let active_role = wire.identity
+        .as_ref()
+        .and_then(|identity| identity.active_role.as_deref())
+        .map(|role| role.trim().to_ascii_lowercase())
+        .filter(|role| matches!(role.as_str(), "administrator" | "founder" | "director" | "supreme" | "vip"))
+        .unwrap_or_else(|| tier.clone());
+    let actual_admin = wire.identity
+        .as_ref()
+        .and_then(|identity| identity.actual_admin)
+        .unwrap_or(false);
+    Ok(LotteryMemberProfilePayload {
+        user_id,
+        username,
+        tier,
+        active_role,
+        actual_admin,
+    })
+}
+
+fn parse_lottery_member_activity(payload: &str) -> anyhow::Result<LotteryMemberActivityPayload> {
+    let wire: LotteryMemberActivityWire = serde_json::from_str(payload)?;
+    if wire.remaining_chances < 0 {
+        anyhow::bail!("活动剩余次数无效");
+    }
+    if !matches!(wire.portal_path.as_str(), "/" | "/vip") {
+        anyhow::bail!("活动入口无效");
+    }
+    let campaign = wire.campaign.map(|campaign| {
+        let id = campaign.id.trim().to_string();
+        let title = campaign.title.trim().to_string();
+        if id.is_empty() || title.is_empty() || campaign.ends_at <= 0 {
+            anyhow::bail!("活动信息无效");
+        }
+        Ok(LotteryMemberCampaignPayload {
+            id,
+            title,
+            ends_at: campaign.ends_at,
+        })
+    }).transpose()?;
+    Ok(LotteryMemberActivityPayload {
+        campaign,
+        remaining_chances: wire.remaining_chances,
+        portal_path: wire.portal_path,
+    })
+}
+
+async fn fetch_lottery_member_profile(access_token: &str) -> anyhow::Result<LotteryMemberProfilePayload> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()?
+        .get(format!("{LOTTERY_MEMBER_SERVICE_URL}/api/client/me"))
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+    let status = response.status();
+    let payload = response.text().await?;
+    if !status.is_success() {
+        anyhow::bail!("抽奖系统身份核验失败（HTTP {}）", status.as_u16());
+    }
+    parse_lottery_member_profile(&payload)
+}
+
+async fn fetch_lottery_member_activity(access_token: &str) -> anyhow::Result<LotteryMemberActivityPayload> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()?
+        .get(format!("{LOTTERY_MEMBER_SERVICE_URL}/api/client/activity"))
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+    let status = response.status();
+    let payload = response.text().await?;
+    if !status.is_success() {
+        anyhow::bail!("活动中心读取失败（HTTP {}）", status.as_u16());
+    }
+    parse_lottery_member_activity(&payload)
+}
+
+async fn fetch_lottery_member_portal_link(access_token: &str) -> anyhow::Result<String> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()?
+        .post(format!("{LOTTERY_MEMBER_SERVICE_URL}/api/client/portal-ticket"))
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+    let status = response.status();
+    let payload = response.text().await?;
+    if !status.is_success() {
+        anyhow::bail!("Activity portal handoff failed with HTTP {}", status.as_u16());
+    }
+    let wire: LotteryMemberPortalLinkWire = serde_json::from_str(&payload)?;
+    let portal_path = wire.portal_path.trim();
+    if !portal_path.starts_with("/api/client/portal-login?ticket=") {
+        anyhow::bail!("Activity portal handoff path is invalid");
+    }
+    Ok(format!("{LOTTERY_MEMBER_SERVICE_URL}{portal_path}"))
+}
+
+#[tauri::command]
+pub async fn client_login(username: String, password: String) -> CommandResult<Value> {
+    if username.trim().is_empty() || password.is_empty() {
+        return failed("请输入账号和密码。", json!({}));
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return failed("无法初始化会员登录服务。", json!({})),
+    };
+    let response = match client
+        .post(format!("{LOTTERY_MEMBER_SERVICE_URL}/api/client/login"))
+        .json(&json!({ "username": username.trim(), "password": password }))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return failed("无法连接抽奖系统，请检查网络后重试。", json!({})),
+    };
+    let status = response.status();
+    let payload = match response.text().await {
+        Ok(payload) => payload,
+        Err(_) => return failed("会员登录响应读取失败。", json!({})),
+    };
+    if !status.is_success() {
+        return failed("账号或密码不正确。", json!({}));
+    }
+    let login: LotteryMemberLoginWire = match serde_json::from_str::<LotteryMemberLoginWire>(&payload) {
+        Ok(login) if !login.access_token.trim().is_empty() => login,
+        _ => return failed("会员登录响应无效。", json!({})),
+    };
+    match fetch_lottery_member_profile(&login.access_token).await {
+        Ok(profile) => ok(
+            "会员身份核验成功。",
+            json!({
+                "accessToken": login.access_token,
+                "profile": profile,
+            }),
+        ),
+        Err(_) => failed("会员身份核验失败，请稍后重试。", json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn client_profile(access_token: String) -> CommandResult<Value> {
+    match fetch_lottery_member_profile(access_token.trim()).await {
+        Ok(profile) => ok("会员身份已更新。", json!(profile)),
+        Err(_) => failed("登录已失效，请重新登录。", json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn update_client_active_role(access_token: String, active_role: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::PUT, "/api/client/identity/active-role", Some(json!({ "activeRole": active_role }))).await {
+        Ok(payload) => ok("Identity updated", payload),
+        Err(error) => failed(&format!("Unable to update identity: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub fn sync_client_identity_window_icon(active_role: String) -> CommandResult<Value> {
+    let icon_path = match codex_plus_core::identity_icon::materialize_icon_for_role(&active_role) {
+        Ok(path) => path,
+        Err(error) => return failed(&format!("Unable to prepare identity icon: {error}"), json!({})),
+    };
+    let process_id = StatusStore::default()
+        .load_latest()
+        .ok()
+        .flatten()
+        .and_then(|status| status.process_id);
+    #[cfg(windows)]
+    let mut applied = false;
+    if let Some(process_id) = process_id {
+        for attempt in 0..3 {
+            applied |= codex_plus_core::windows_apply_codexplusplus_icon_to_process_tree(process_id, icon_path.clone());
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(350));
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let applied = false;
+
+    ok(
+        "Identity icon synchronized",
+        json!({
+            "applied": applied,
+            "processId": process_id,
+            "iconPath": icon_path,
+        }),
+    )
+}
+
+#[tauri::command]
+pub async fn client_activity(access_token: String) -> CommandResult<Value> {
+    match fetch_lottery_member_activity(access_token.trim()).await {
+        Ok(activity) => ok("活动信息已更新。", json!(activity)),
+        Err(_) => failed("活动信息暂时无法读取，请重新登录后重试。", json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn community_comments(access_token: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::GET, "/api/client/community/comments", None).await {
+        Ok(payload) => ok("超话已刷新。", payload),
+        Err(error) => failed(&format!("读取超话失败：{error}"), json!({ "comments": [], "canModerate": false })),
+    }
+}
+
+#[tauri::command]
+pub async fn post_community_comment(access_token: String, content: String) -> CommandResult<Value> {
+    match fetch_client_community(
+        &access_token,
+        reqwest::Method::POST,
+        "/api/client/community/comments",
+        Some(json!({ "content": content })),
+    ).await {
+        Ok(payload) => ok("超话已发布。", payload),
+        Err(error) => failed(&format!("发布超话失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn delete_community_comment(access_token: String, comment_id: String) -> CommandResult<Value> {
+    let path = format!("/api/client/community/comments/{}", urlencoding::encode(comment_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::DELETE, &path, None).await {
+        Ok(payload) => ok("超话已删除。", payload),
+        Err(error) => failed(&format!("删除超话失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn toggle_community_comment_like(access_token: String, comment_id: String) -> CommandResult<Value> {
+    let path = format!("/api/client/community/comments/{}/likes/toggle", urlencoding::encode(comment_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::POST, &path, None).await {
+        Ok(payload) => ok("Like updated", payload),
+        Err(error) => failed(&format!("Unable to update like: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn reply_to_community_comment(access_token: String, comment_id: String, content: String) -> CommandResult<Value> {
+    let path = format!("/api/client/community/comments/{}/replies", urlencoding::encode(comment_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::POST, &path, Some(json!({ "content": content }))).await {
+        Ok(payload) => ok("Reply published", payload),
+        Err(error) => failed(&format!("Unable to publish reply: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn list_private_friends(access_token: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::GET, "/api/client/friends", None).await {
+        Ok(payload) => ok("Friends loaded", payload),
+        Err(error) => failed(&format!("Unable to load friends: {error}"), json!({ "friends": [], "incomingRequests": [] })),
+    }
+}
+
+#[tauri::command]
+pub async fn update_private_presence(access_token: String, status: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::PUT, "/api/client/presence", Some(json!({ "status": status }))).await {
+        Ok(payload) => ok("Presence updated", payload),
+        Err(error) => failed(&format!("Unable to update presence: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn respond_to_friend_request(access_token: String, request_id: String, accept: bool) -> CommandResult<Value> {
+    let action = if accept { "accept" } else { "reject" };
+    let path = format!("/api/client/friend-requests/{}/{}", urlencoding::encode(request_id.trim()), action);
+    match fetch_client_community(&access_token, reqwest::Method::POST, &path, None).await {
+        Ok(payload) => ok("Friend request updated", payload),
+        Err(error) => failed(&format!("Unable to update friend request: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn send_friend_request(access_token: String, user_id: String, username: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::POST, "/api/client/friend-requests", Some(json!({ "userId": user_id, "username": username }))).await {
+        Ok(payload) => ok("Friend request sent", payload),
+        Err(error) => failed(&format!("Unable to send friend request: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn cancel_friend_request(access_token: String, friend_user_id: String) -> CommandResult<Value> {
+    let path = format!("/api/client/friend-requests/{}", urlencoding::encode(friend_user_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::DELETE, &path, None).await {
+        Ok(payload) => ok("Friend request cancelled", payload),
+        Err(error) => failed(&format!("Unable to cancel friend request: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn search_registered_friend(access_token: String, query: String) -> CommandResult<Value> {
+    let path = format!("/api/client/friend-search?query={}", urlencoding::encode(query.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::GET, &path, None).await {
+        Ok(payload) => ok("Friend search completed", payload),
+        Err(error) => failed(&format!("Unable to search friend: {error}"), json!({ "result": null })),
+    }
+}
+
+#[tauri::command]
+pub async fn load_private_messages(access_token: String, friend_user_id: String) -> CommandResult<Value> {
+    let path = format!("/api/client/private-messages/{}", urlencoding::encode(friend_user_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::GET, &path, None).await {
+        Ok(mut payload) => {
+            normalize_private_chat_media_urls(&mut payload);
+            ok("Messages loaded", payload)
+        }
+        Err(error) => failed(&format!("Unable to load messages: {error}"), json!({ "messages": [] })),
+    }
+}
+
+#[tauri::command]
+pub async fn send_private_message(access_token: String, friend_user_id: String, content: String) -> CommandResult<Value> {
+    let path = format!("/api/client/private-messages/{}", urlencoding::encode(friend_user_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::POST, &path, Some(json!({ "content": content }))).await {
+        Ok(payload) => ok("Message sent", payload),
+        Err(error) => failed(&format!("Unable to send message: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn send_private_attachment(
+    access_token: String,
+    friend_user_id: String,
+    data_base64: String,
+    file_name: String,
+    mime_type: String,
+) -> CommandResult<Value> {
+    let normalized_mime_type = mime_type.trim().to_ascii_lowercase();
+    if !(normalized_mime_type.starts_with("image/") || normalized_mime_type.starts_with("video/")) {
+        return failed("Only image and video attachments are supported", json!({}));
+    }
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(data_base64.trim().as_bytes()) {
+        Ok(bytes) if !bytes.is_empty() && bytes.len() <= PRIVATE_CHAT_ATTACHMENT_MAX_BYTES => bytes,
+        _ => return failed("Attachment must be smaller than 30 MB", json!({})),
+    };
+    let path = format!("/api/client/private-messages/{}/attachment", urlencoding::encode(friend_user_id.trim()));
+    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(45)).build() {
+        Ok(client) => client,
+        Err(error) => return failed(&format!("Unable to prepare attachment upload: {error}"), json!({})),
+    };
+    let response = match client
+        .post(format!("{LOTTERY_MEMBER_SERVICE_URL}{path}"))
+        .bearer_auth(access_token.trim())
+        .header(reqwest::header::CONTENT_TYPE, normalized_mime_type)
+        .header("x-attachment-name", urlencoding::encode(file_name.trim()).into_owned())
+        .body(bytes)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => return failed(&format!("Unable to upload attachment: {error}"), json!({})),
+    };
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => return failed(&format!("Unable to read attachment response: {error}"), json!({})),
+    };
+    if !status.is_success() {
+        return failed(&format!("Attachment upload failed (HTTP {})", status.as_u16()), json!({}));
+    }
+    match serde_json::from_str::<Value>(&body) {
+        Ok(mut payload) => {
+            normalize_private_chat_media_urls(&mut payload);
+            ok("Attachment sent", payload)
+        }
+        Err(error) => failed(&format!("Unable to parse attachment response: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn client_announcements(access_token: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::GET, "/api/client/announcements", None).await {
+        Ok(payload) => ok("公告已更新。", payload),
+        Err(error) => failed(&format!("读取公告失败：{error}"), json!({ "announcements": [], "canManage": false })),
+    }
+}
+
+#[tauri::command]
+pub async fn manage_client_announcements(access_token: String) -> CommandResult<Value> {
+    match fetch_client_community(&access_token, reqwest::Method::GET, "/api/client/announcements/manage", None).await {
+        Ok(payload) => ok("公告管理已更新。", payload),
+        Err(error) => failed(&format!("读取公告管理失败：{error}"), json!({ "announcements": [] })),
+    }
+}
+
+#[tauri::command]
+pub async fn save_client_announcement(access_token: String, announcement_id: Option<String>, payload: Value) -> CommandResult<Value> {
+    let (method, path) = match announcement_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        Some(id) => (reqwest::Method::PUT, format!("/api/client/announcements/{}", urlencoding::encode(id))),
+        None => (reqwest::Method::POST, "/api/client/announcements".to_string()),
+    };
+    match fetch_client_community(&access_token, method, &path, Some(payload)).await {
+        Ok(result) => ok("公告已保存。", result),
+        Err(error) => failed(&format!("保存公告失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn withdraw_client_announcement(access_token: String, announcement_id: String) -> CommandResult<Value> {
+    let path = format!("/api/client/announcements/{}/withdraw", urlencoding::encode(announcement_id.trim()));
+    match fetch_client_community(&access_token, reqwest::Method::POST, &path, None).await {
+        Ok(result) => ok("公告已撤回。", result),
+        Err(error) => failed(&format!("撤回公告失败：{error}"), json!({})),
+    }
+}
+
+async fn fetch_client_community(
+    access_token: &str,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<Value>,
+) -> anyhow::Result<Value> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(12)).build()?;
+    let request = client.request(method, format!("{LOTTERY_MEMBER_SERVICE_URL}{path}")).bearer_auth(access_token.trim());
+    let response = if let Some(body) = body { request.json(&body).send().await? } else { request.send().await? };
+    let status = response.status();
+    let payload = response.text().await?;
+    if !status.is_success() { anyhow::bail!("HTTP {}", status.as_u16()); }
+    Ok(serde_json::from_str(&payload)?)
+}
+
+fn normalize_private_chat_media_urls(payload: &mut Value) {
+    let normalize = |message: &mut Value| {
+        let Some(url) = message.get_mut("attachmentUrl").and_then(|value| value.as_str().map(str::to_string)) else { return; };
+        if url.starts_with('/') {
+            message["attachmentUrl"] = Value::String(format!("{LOTTERY_MEMBER_SERVICE_URL}{url}"));
+        }
+    };
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages { normalize(message); }
+    }
+    if let Some(message) = payload.get_mut("message") { normalize(message); }
+}
+
+#[tauri::command]
+pub async fn client_portal_link(access_token: String) -> CommandResult<Value> {
+    match fetch_lottery_member_portal_link(access_token.trim()).await {
+        Ok(portal_url) => ok("活动中心登录跳转已准备好。", json!({ "portalUrl": portal_url })),
+        Err(_) => failed("活动中心登录跳转暂时不可用，请稍后重试。", json!({})),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -341,14 +920,341 @@ pub struct ScriptMarketPayload {
     pub user_scripts: Value,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillMarketPayload {
+    pub market: Value,
+}
+
 #[tauri::command]
 pub fn backend_version() -> CommandResult<VersionPayload> {
     ok(
         "后端版本已读取。",
         VersionPayload {
-            version: codex_plus_core::version::VERSION.to_string(),
+            version: codex_plus_core::version::DISPLAY_VERSION.to_string(),
         },
     )
+}
+
+#[tauri::command]
+pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
+    let current_version = codex_plus_core::version::DISPLAY_VERSION.to_string();
+    match fetch_codework_release_manifest().await {
+        Ok(manifest) => {
+            let available = compare_release_versions(&manifest.version, &current_version)
+                .map(|ordering| ordering.is_gt())
+                .unwrap_or(false);
+            ok(
+                if available { "发现新版本。" } else { "当前已是最新版本。" },
+                CodeworkReleasePayload {
+                    available,
+                    current_version,
+                    latest_version: Some(manifest.version),
+                    download_url: Some(manifest.download_url),
+                    notes: manifest.notes,
+                },
+            )
+        }
+        Err(error) => failed(
+            &format!("暂时无法检查新版本：{error}"),
+            CodeworkReleasePayload {
+                available: false,
+                current_version,
+                latest_version: None,
+                download_url: None,
+                notes: Vec::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_codework_release(
+    app: tauri::AppHandle,
+) -> CommandResult<CodeworkReleasePayload> {
+    let current_version = codex_plus_core::version::DISPLAY_VERSION.to_string();
+    let manifest = match fetch_codework_release_manifest().await {
+        Ok(manifest) => manifest,
+        Err(error) => return failed(
+            &format!("无法读取更新信息：{error}"),
+            empty_codework_release_payload(current_version),
+        ),
+    };
+    let has_newer_version = compare_release_versions(&manifest.version, &current_version)
+        .map(|ordering| ordering.is_gt())
+        .unwrap_or(false);
+    if !has_newer_version {
+        return failed(
+            "当前没有可安装的新版本。",
+            CodeworkReleasePayload {
+                available: false,
+                current_version,
+                latest_version: Some(manifest.version),
+                download_url: Some(manifest.download_url),
+                notes: manifest.notes,
+            },
+        );
+    }
+
+    let payload = CodeworkReleasePayload {
+        available: true,
+        current_version,
+        latest_version: Some(manifest.version.clone()),
+        download_url: Some(manifest.download_url.clone()),
+        notes: manifest.notes.clone(),
+    };
+    let _ = app.emit(
+        CODEWORK_RELEASE_PROGRESS_EVENT,
+        json!({ "stage": "downloading", "downloadedBytes": 0_u64 }),
+    );
+
+    match download_codework_release(&app, &manifest.download_url).await {
+        Ok(installer_path) => match std::process::Command::new(&installer_path)
+            .args(codework_release_installer_args())
+            .spawn()
+        {
+            Ok(_) => {
+                let _ = app.emit(
+                    CODEWORK_RELEASE_PROGRESS_EVENT,
+                    json!({ "stage": "installing", "downloadedBytes": 0_u64 }),
+                );
+                let _ = app.emit(
+                    CODEWORK_RELEASE_PROGRESS_EVENT,
+                    json!({ "stage": "closing", "downloadedBytes": 0_u64, "percent": 100_u64 }),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(650));
+                app.exit(0);
+                ok("更新安装包已启动，客户端将自动覆盖安装并重新启动。", payload)
+            }
+            Err(error) => failed(&format!("无法启动更新安装包：{error}"), payload),
+        },
+        Err(error) => failed(&format!("下载更新失败：{error}"), payload),
+    }
+}
+
+fn codework_release_installer_args() -> [&'static str; 2] {
+    ["/S", "/UPDATE"]
+}
+
+fn empty_codework_release_payload(current_version: String) -> CodeworkReleasePayload {
+    CodeworkReleasePayload {
+        available: false,
+        current_version,
+        latest_version: None,
+        download_url: None,
+        notes: Vec::new(),
+    }
+}
+
+async fn fetch_codework_release_manifest() -> anyhow::Result<CodeworkReleaseManifest> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()?
+        .get(CODEWORK_RELEASE_MANIFEST_URL)
+        .send()
+        .await?
+        .error_for_status()?;
+    let manifest: CodeworkReleaseManifest = response.json().await?;
+    validate_codework_release_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_codework_release_manifest(manifest: &CodeworkReleaseManifest) -> anyhow::Result<()> {
+    if parse_release_version(&manifest.version).is_none() {
+        anyhow::bail!("发布版本号格式无效");
+    }
+    let url = Url::parse(&manifest.download_url)?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        anyhow::bail!("发布下载地址不安全");
+    }
+    Ok(())
+}
+
+fn compare_release_versions(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    parse_release_version(left)?.partial_cmp(&parse_release_version(right)?)
+}
+
+fn parse_release_version(value: &str) -> Option<[u32; 3]> {
+    let parts: Vec<_> = value.split('.').collect();
+    if parts.len() != 3 { return None; }
+    let mut parsed = [0_u32; 3];
+    for (index, part) in parts.iter().enumerate() {
+        parsed[index] = part.parse().ok()?;
+    }
+    Some(parsed)
+}
+
+async fn download_codework_release(
+    app: &tauri::AppHandle,
+    download_url: &str,
+) -> anyhow::Result<PathBuf> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?
+        .get(download_url)
+        .send()
+        .await?
+        .error_for_status()?;
+    let total = response.content_length();
+    let download_dir = std::env::temp_dir().join("Codework AI客户端");
+    fs::create_dir_all(&download_dir)?;
+    let installer_path = download_dir.join("Codework-update-setup.exe");
+    let partial_path = download_dir.join("Codework-update-setup.exe.part");
+    let mut output = fs::File::create(&partial_path)?;
+    let mut downloaded = 0_u64;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        output.write_all(&chunk)?;
+        downloaded += chunk.len() as u64;
+        let percent = total.and_then(|total| (total > 0).then(|| downloaded.saturating_mul(100) / total));
+        let _ = app.emit(
+            CODEWORK_RELEASE_PROGRESS_EVENT,
+            json!({ "stage": "downloading", "downloadedBytes": downloaded, "totalBytes": total, "percent": percent }),
+        );
+    }
+    output.flush()?;
+    drop(output);
+    fs::rename(partial_path, &installer_path)?;
+    let _ = app.emit(
+        CODEWORK_RELEASE_PROGRESS_EVENT,
+        json!({ "stage": "downloaded", "downloadedBytes": downloaded, "totalBytes": total, "percent": 100_u64 }),
+    );
+    Ok(installer_path)
+}
+
+#[tauri::command]
+pub async fn get_chatgpt_install_status() -> CommandResult<ChatGptInstallPayload> {
+    let result = tauri::async_runtime::spawn_blocking(inspect_chatgpt_installation).await;
+    match result {
+        Ok(Ok(payload)) => ok(
+            if payload.installed { "已检测到官方 ChatGPT。" } else { "尚未安装官方 ChatGPT。" },
+            payload,
+        ),
+        Ok(Err(error)) => failed(&format!("无法检测 ChatGPT 安装状态：{error}"), empty_chatgpt_payload()),
+        Err(error) => failed(&format!("无法检测 ChatGPT 安装状态：{error}"), empty_chatgpt_payload()),
+    }
+}
+
+#[tauri::command]
+pub async fn install_official_chatgpt(app: tauri::AppHandle) -> CommandResult<ChatGptInstallPayload> {
+    let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "checking" }));
+    let app_for_task = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || install_official_chatgpt_blocking(&app_for_task)).await;
+    match result {
+        Ok(Ok(payload)) => ok("官方 ChatGPT 已安装，桌面快捷方式已创建。", payload),
+        Ok(Err(error)) => failed(&format!("安装官方 ChatGPT 未完成：{error}"), empty_chatgpt_payload()),
+        Err(error) => failed(&format!("安装官方 ChatGPT 未完成：{error}"), empty_chatgpt_payload()),
+    }
+}
+
+fn empty_chatgpt_payload() -> ChatGptInstallPayload {
+    ChatGptInstallPayload {
+        installed: false,
+        winget_available: false,
+        store_product_id: None,
+        shortcut_created: false,
+    }
+}
+
+fn inspect_chatgpt_installation() -> anyhow::Result<ChatGptInstallPayload> {
+    let winget_available = command_succeeds("winget", &["--version"]);
+    let installed = chatgpt_start_app_id()?.is_some();
+    let store_product_id = if winget_available { find_official_chatgpt_store_product()? } else { None };
+    Ok(ChatGptInstallPayload {
+        installed,
+        winget_available,
+        store_product_id,
+        shortcut_created: false,
+    })
+}
+
+fn install_official_chatgpt_blocking(app: &tauri::AppHandle) -> anyhow::Result<ChatGptInstallPayload> {
+    let mut status = inspect_chatgpt_installation()?;
+    if status.installed {
+        let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "creatingShortcut" }));
+        status.shortcut_created = create_chatgpt_desktop_shortcut()?;
+        let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "completed" }));
+        return Ok(status);
+    }
+    if !status.winget_available {
+        anyhow::bail!("此 Windows 未检测到 Microsoft Store 安装组件（winget）。请先更新 Microsoft Store 或 App Installer。");
+    }
+    let product_id = status
+        .store_product_id
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("Microsoft Store 暂时未返回可安装的官方 ChatGPT 条目。"))?;
+    let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "installing", "productId": product_id }));
+    let output = std::process::Command::new("winget")
+        .args([
+            "install", "--id", &product_id, "--source", "msstore",
+            "--accept-package-agreements", "--accept-source-agreements",
+        ])
+        .output()?;
+    if !output.status.success() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        anyhow::bail!(if message.is_empty() { "Microsoft Store 安装命令没有成功完成。".to_string() } else { message });
+    }
+    let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "creatingShortcut" }));
+    let shortcut_created = create_chatgpt_desktop_shortcut()?;
+    let _ = app.emit(CHATGPT_INSTALL_PROGRESS_EVENT, json!({ "stage": "completed" }));
+    Ok(ChatGptInstallPayload {
+        installed: true,
+        winget_available: true,
+        store_product_id: Some(product_id),
+        shortcut_created,
+    })
+}
+
+fn find_official_chatgpt_store_product() -> anyhow::Result<Option<String>> {
+    for product_id in CHATGPT_STORE_PRODUCT_IDS {
+        let output = match std::process::Command::new("winget")
+            .args(["show", "--id", product_id, "--source", "msstore", "--accept-source-agreements"])
+            .output() {
+                Ok(output) => output,
+                Err(_) => return Ok(None),
+            };
+        if output.status.success() {
+            let description = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            ).to_lowercase();
+            if description.contains("openai") { return Ok(Some((*product_id).to_string())); }
+        }
+    }
+    Ok(None)
+}
+
+fn chatgpt_start_app_id() -> anyhow::Result<Option<String>> {
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile", "-NonInteractive", "-Command",
+            "(Get-StartApps | Where-Object { $_.Name -eq 'ChatGPT' } | Select-Object -First 1 -ExpandProperty AppID)",
+        ])
+        .output()?;
+    if !output.status.success() { return Ok(None); }
+    let app_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!app_id.is_empty()).then_some(app_id))
+}
+
+fn create_chatgpt_desktop_shortcut() -> anyhow::Result<bool> {
+    let Some(app_id) = chatgpt_start_app_id()? else { return Ok(false); };
+    let escaped_app_id = app_id.replace("'", "''");
+    let script = format!(
+        "$desktop=[Environment]::GetFolderPath('Desktop');$shell=New-Object -ComObject WScript.Shell;$shortcut=$shell.CreateShortcut((Join-Path $desktop 'ChatGPT.lnk'));$shortcut.TargetPath='explorer.exe';$shortcut.Arguments='shell:AppsFolder\\{escaped_app_id}';$shortcut.Description='Open official ChatGPT';$shortcut.Save()"
+    );
+    let status = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .status()?;
+    Ok(status.success())
+}
+
+fn command_succeeds(command: &str, args: &[&str]) -> bool {
+    std::process::Command::new(command)
+        .args(args)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -363,7 +1269,7 @@ pub async fn load_overview() -> CommandResult<OverviewPayload> {
                 silent_shortcut: path_state(None),
                 management_shortcut: path_state(None),
                 latest_launch: None,
-                current_version: codex_plus_core::version::VERSION.to_string(),
+                current_version: codex_plus_core::version::DISPLAY_VERSION.to_string(),
                 update_status: "not_checked".to_string(),
                 settings_path: codex_plus_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -384,7 +1290,7 @@ pub async fn load_overview() -> CommandResult<OverviewPayload> {
             silent_shortcut: shortcut_state(entrypoints.silent_shortcut),
             management_shortcut: shortcut_state(entrypoints.management_shortcut),
             latest_launch,
-            current_version: codex_plus_core::version::VERSION.to_string(),
+            current_version: codex_plus_core::version::DISPLAY_VERSION.to_string(),
             update_status: "not_checked".to_string(),
             settings_path: codex_plus_core::paths::default_settings_path()
                 .to_string_lossy()
@@ -1266,6 +2172,59 @@ pub async fn install_market_script(id: String) -> CommandResult<ScriptMarketPayl
                 &manifest,
                 "failed",
                 &format!("安装脚本失败：{error}"),
+            ),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_skill_market() -> CommandResult<SkillMarketPayload> {
+    match skill_market::fetch_skill_manifest(skill_market::DEFAULT_SKILL_MARKET_INDEX_URL).await {
+        Ok(manifest) => ok(
+            "Skill 市场已刷新。",
+            skill_market_payload_from_manifest(&manifest, &default_skill_market_root(), "ok", "Skill 市场已刷新。"),
+        ),
+        Err(error) => failed(
+            &format!("Skill 市场加载失败：{error}"),
+            failed_skill_market_payload(&format!("Skill 市场加载失败：{error}")),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_market_skill(id: String) -> CommandResult<SkillMarketPayload> {
+    let id = id.trim();
+    if id.is_empty() {
+        return failed("Skill ID 不能为空。", failed_skill_market_payload("Skill ID 不能为空。"));
+    }
+    let manifest = match skill_market::fetch_skill_manifest(skill_market::DEFAULT_SKILL_MARKET_INDEX_URL).await {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return failed(
+                &format!("Skill 市场加载失败：{error}"),
+                failed_skill_market_payload(&format!("Skill 市场加载失败：{error}")),
+            );
+        }
+    };
+    let Some(skill) = manifest.skills.iter().find(|skill| skill.id == id) else {
+        return failed(
+            "未找到该官方 Skill。",
+            skill_market_payload_from_manifest(&manifest, &default_skill_market_root(), "failed", "未找到该官方 Skill。"),
+        );
+    };
+    let skills_root = default_skill_market_root();
+    match skill_market::install_market_skill(&skills_root, skill).await {
+        Ok(()) => ok(
+            "Skill 已安装。",
+            skill_market_payload_from_manifest(&manifest, &skills_root, "ok", "Skill 已安装。"),
+        ),
+        Err(error) => failed(
+            &format!("Skill 安装失败：{error}"),
+            skill_market_payload_from_manifest(
+                &manifest,
+                &skills_root,
+                "failed",
+                &format!("Skill 安装失败：{error}"),
             ),
         ),
     }
@@ -2985,6 +3944,63 @@ fn market_script_payload(script: &MarketScript, installed: &BTreeMap<String, Str
     })
 }
 
+fn failed_skill_market_payload(message: &str) -> SkillMarketPayload {
+    SkillMarketPayload {
+        market: json!({
+            "status": "failed",
+            "message": message,
+            "indexUrl": skill_market::DEFAULT_SKILL_MARKET_INDEX_URL,
+            "updatedAt": "",
+            "skills": []
+        }),
+    }
+}
+
+fn skill_market_payload_from_manifest(
+    manifest: &SkillMarketManifest,
+    skills_root: &Path,
+    status: &str,
+    message: &str,
+) -> SkillMarketPayload {
+    let installed = skill_market::installed_skill_versions(skills_root);
+    let skills = manifest
+        .skills
+        .iter()
+        .map(|skill| market_skill_payload(skill, &installed))
+        .collect::<Vec<_>>();
+    SkillMarketPayload {
+        market: json!({
+            "status": status,
+            "message": message,
+            "indexUrl": skill_market::DEFAULT_SKILL_MARKET_INDEX_URL,
+            "updatedAt": manifest.updated_at.clone().unwrap_or_default(),
+            "skills": skills
+        }),
+    }
+}
+
+fn market_skill_payload(skill: &MarketSkill, installed: &BTreeMap<String, String>) -> Value {
+    let installed_version = installed.get(&skill.id).cloned().unwrap_or_default();
+    let is_installed = !installed_version.is_empty();
+    json!({
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description,
+        "usage": skill.usage,
+        "version": skill.version,
+        "author": skill.author,
+        "tags": skill.tags,
+        "homepage": skill.homepage,
+        "installed": is_installed,
+        "installedVersion": installed_version,
+        "updateAvailable": is_installed && installed.get(&skill.id).map(|version| version != &skill.version).unwrap_or(false)
+    })
+}
+
+fn default_skill_market_root() -> PathBuf {
+    codex_plus_core::codex_home::default_codex_home_dir().join("skills")
+}
+
 fn default_user_script_manager() -> UserScriptManager {
     let config_dir = user_scripts_config_dir();
     UserScriptManager::new(
@@ -3027,7 +4043,7 @@ fn diagnostics_report() -> String {
             silent_shortcut: shortcut_state(entrypoints.silent_shortcut),
             management_shortcut: shortcut_state(entrypoints.management_shortcut),
             latest_launch,
-            current_version: codex_plus_core::version::VERSION.to_string(),
+            current_version: codex_plus_core::version::DISPLAY_VERSION.to_string(),
             update_status: "not_checked".to_string(),
             settings_path: codex_plus_core::paths::default_settings_path()
                 .to_string_lossy()
@@ -3162,6 +4178,32 @@ mod tests {
 
         assert_eq!(result.status, "ok");
         assert!(!result.payload.version.is_empty());
+    }
+
+    #[test]
+    fn parses_lottery_member_identity_with_supreme_tier() {
+        let profile = parse_lottery_member_profile(
+            r#"{"user":{"id":"609","username":"QualifiedMember"},"entitlements":{"tier":"supreme"},"identity":{"activeRole":"administrator","actualAdmin":true}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(profile.user_id, "609");
+        assert_eq!(profile.username, "QualifiedMember");
+        assert_eq!(profile.tier, "supreme");
+        assert_eq!(profile.active_role, "administrator");
+        assert!(profile.actual_admin);
+    }
+
+    #[test]
+    fn parses_lottery_activity_for_the_member_center() {
+        let activity = parse_lottery_member_activity(
+            r#"{"campaign":{"id":"summer","title":"夏日福利活动","endsAt":1780000000000},"remainingChances":3,"portalPath":"/vip"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(activity.remaining_chances, 3);
+        assert_eq!(activity.portal_path, "/vip");
+        assert_eq!(activity.campaign.unwrap().title, "夏日福利活动");
     }
 
     #[test]
@@ -3837,5 +4879,54 @@ model_reasoning_effort = "high"
 
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("只允许打开 http 或 https 链接"));
+    }
+
+    #[test]
+    fn skill_market_payload_reports_installed_version_and_update_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let installed = temp.path().join("smart-copywriter");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(
+            installed.join(".codework-skill.json"),
+            r#"{"id":"smart-copywriter","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let manifest = codex_plus_core::skill_market::SkillMarketManifest {
+            version: 1,
+            updated_at: Some("2026-07-17T00:00:00Z".to_string()),
+            skills: vec![codex_plus_core::skill_market::MarketSkill {
+                id: "smart-copywriter".to_string(),
+                name: "智能文案助手".to_string(),
+                description: "撰写实用文案".to_string(),
+                usage: codex_plus_core::skill_market::SkillUsageGuide {
+                    scenarios: "宣传文案".to_string(),
+                    trigger: "直接说请使用智能文案助手".to_string(),
+                    output: "标题和正文".to_string(),
+                    notice: "发布前确认".to_string(),
+                },
+                version: "1.1.0".to_string(),
+                author: "Codework AI".to_string(),
+                tags: vec!["文案".to_string()],
+                homepage: String::new(),
+                package_url: "https://example.invalid/smart-copywriter.zip".to_string(),
+                sha256: "a".repeat(64),
+            }],
+        };
+
+        let payload = skill_market_payload_from_manifest(&manifest, temp.path(), "ok", "已刷新");
+
+        assert_eq!(payload.market["skills"][0]["name"], json!("智能文案助手"));
+        assert_eq!(payload.market["skills"][0]["installed"], json!(true));
+        assert_eq!(payload.market["skills"][0]["installedVersion"], json!("1.0.0"));
+        assert_eq!(payload.market["skills"][0]["updateAvailable"], json!(true));
+        assert_eq!(
+            payload.market["skills"][0]["usage"]["scenarios"],
+            json!("宣传文案")
+        );
+    }
+
+    #[test]
+    fn codework_release_update_uses_silent_installer_arguments() {
+        assert_eq!(codework_release_installer_args(), ["/S", "/UPDATE"]);
     }
 }

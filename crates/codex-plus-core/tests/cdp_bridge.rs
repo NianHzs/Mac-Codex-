@@ -91,6 +91,30 @@ fn injection_script_installs_image_overlay_from_data_uri() {
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
     ));
     assert!(script.contains("image_overlay_installed"));
+    assert!(script.contains("zIndex: \"-1\""));
+}
+
+#[test]
+fn injected_titlebar_crown_tracks_the_verified_member_identity() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("/identity/status"));
+    assert!(script.contains("data-role"));
+    for role in ["administrator", "founder", "director", "supreme", "vip"] {
+        assert!(script.contains(role));
+    }
+    for color in ["#3b82f6", "#b74a58", "#a9c8e8", "#f6c84c", "#78a8d8"] {
+        assert!(script.contains(color));
+    }
+}
+
+#[test]
+fn injected_titlebar_crown_reads_identity_from_local_helper_when_bridge_exists() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("fetchIdentityStatusFromHelper"));
+    assert!(script.contains("identity_helper_fallback_ok"));
+    assert!(script.contains("lastVerifiedRole"));
 }
 
 #[test]
@@ -107,7 +131,7 @@ fn injection_script_marks_diagnostic_build_and_reports_script_loaded() {
 fn injection_script_has_only_codework_wechat_support() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("Codework Codex++"));
+    assert!(script.contains("Codework AI客户端"));
     assert!(script.contains("微信赞赏"));
     assert!(!script.contains("BigPizzaV3/Ad-List"));
     assert!(!script.contains("支付宝赞赏码"));

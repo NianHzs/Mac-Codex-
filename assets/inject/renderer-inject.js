@@ -321,6 +321,7 @@
     ["Copy session id", "复制会话 ID"],
     ["Copy working directory", "复制工作目录"],
   ]);
+  const codexPlusProductLabel = window.__CODEX_PLUS_PRODUCT_LABEL__ || "Codework AI客户端";
   let codexPlusVersion = window.__CODEX_PLUS_VERSION__ || "unknown";
   const codexPlusBuild = window.__CODEX_PLUS_BUILD__ || "unknown";
   const codexPlusSettingsKey = "codexPlusSettings";
@@ -401,7 +402,7 @@
       backgroundRepeat: fitStyles.repeat,
       opacity: String(opacity),
       pointerEvents: "none",
-      zIndex: "2147483646",
+      zIndex: "-1",
       userSelect: "none",
     });
     if (!overlay.parentElement) root.appendChild(overlay);
@@ -910,7 +911,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 4px;
+        gap: 0;
         border: 0;
         background: transparent;
         color: inherit;
@@ -957,11 +958,18 @@
         flex: 0 0 auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 650; }
-      .codex-plus-backend-indicator { width: 9px; height: 9px; border-radius: 999px; background: #a1a1aa; display: inline-block; }
-      .codex-plus-backend-indicator[data-status="ok"] { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.75); }
-      .codex-plus-backend-indicator[data-status="failed"] { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.75); }
-      .codex-plus-backend-indicator[data-status="checking"] { background: #fbbf24; }
+      .codex-plus-modal-title { display: flex; align-items: center; gap: 0; font-size: 18px; font-weight: 650; }
+      .codex-plus-backend-indicator { width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: #52525b; font-size: 16px; line-height: 1; font-family: "Segoe UI Symbol", sans-serif; }
+      .codex-plus-backend-indicator[data-status="ok"] { color: #f6c84c; text-shadow: 0 0 7px rgba(246,200,76,.82), 0 0 15px rgba(246,200,76,.35); }
+      .codex-plus-backend-indicator[data-status="checking"] { color: #d7b96a; animation: codex-plus-crown-breathe 1.45s ease-in-out infinite; }
+      .codex-plus-backend-indicator[data-status="failed"] { color: #52525b; text-shadow: none; }
+      .codex-plus-backend-indicator[data-role="administrator"] { color: #3b82f6; text-shadow: 0 0 7px rgba(59,130,246,.88), 0 0 17px rgba(37,99,235,.46); }
+      .codex-plus-backend-indicator[data-role="founder"] { color: #b74a58; text-shadow: 0 0 7px rgba(183,74,88,.82), 0 0 17px rgba(112,31,44,.5); }
+      .codex-plus-backend-indicator[data-role="director"] { color: #a9c8e8; text-shadow: 0 0 6px rgba(169,200,232,.82), 0 0 15px rgba(91,139,181,.4); }
+      .codex-plus-backend-indicator[data-role="supreme"] { color: #f6c84c; text-shadow: 0 0 7px rgba(246,200,76,.82), 0 0 15px rgba(246,200,76,.35); }
+      .codex-plus-backend-indicator[data-role="vip"] { color: #78a8d8; text-shadow: 0 0 5px rgba(120,168,216,.58); }
+      .codex-plus-backend-indicator[data-role="guest"] { color: #737a86; text-shadow: none; }
+      @keyframes codex-plus-crown-breathe { 0%, 100% { opacity: .42; text-shadow: none; } 50% { opacity: 1; text-shadow: 0 0 10px rgba(215,185,106,.62); } }
       .codex-plus-modal-close {
         border: 0;
         background: transparent;
@@ -1273,7 +1281,7 @@
     }
   }
   function codeworkVisualThemeCssFromTokens(tokens) {
-    return `:root{--codework-theme-background:${tokens.background};--codework-theme-surface:${tokens.surface};--codework-theme-accent:${tokens.accent};--codework-theme-border:${tokens.border};--codework-theme-text:${tokens.text};--codework-theme-radius:${tokens.radius}px;--codework-theme-font-scale:${tokens.fontScale}}html,body{background:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important;font-size:calc(100% * var(--codework-theme-font-scale))!important}button,input,textarea,select{border-color:var(--codework-theme-border)!important;border-radius:var(--codework-theme-radius)!important;color:var(--codework-theme-text)!important;background-color:var(--codework-theme-surface)!important}a,[role="button"]{color:var(--codework-theme-accent)!important}`;
+    return `:root{--codework-theme-background:${tokens.background};--codework-theme-surface:${tokens.surface};--codework-theme-accent:${tokens.accent};--codework-theme-border:${tokens.border};--codework-theme-text:${tokens.text};--codework-theme-radius:${tokens.radius}px;--codework-theme-font-scale:${tokens.fontScale}}html,body{background-color:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important;font-size:calc(100% * var(--codework-theme-font-scale))!important}#root{background-color:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important}aside,[role="navigation"],[role="dialog"]{background-color:var(--codework-theme-surface)!important;border-color:var(--codework-theme-border)!important;color:var(--codework-theme-text)!important}aside *{color:var(--codework-theme-text)!important}aside svg{color:currentColor!important}textarea{background-color:var(--codework-theme-surface)!important;color:var(--codework-theme-text)!important;border-color:var(--codework-theme-border)!important}a{color:var(--codework-theme-accent)!important}`;
   }
   function setCodeworkVisualThemeTokens(tokens) {
     const id = "codework-visual-theme-style";
@@ -2270,6 +2278,53 @@
   let codexPlusUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
   let codexPlusBackendStatus = { status: "checking", message: "正在检查后端…" };
   let codexPlusBackendCheckSeq = 0;
+  let codexPlusIdentity = { role: "guest", lastVerifiedRole: "guest" };
+  let codexPlusIdentityCheckSeq = 0;
+  const codexPlusIdentityLabels = {
+    administrator: "平台执掌者",
+    founder: "创始人",
+    director: "总监",
+    supreme: "至尊 VIP",
+    vip: "普通 VIP",
+    guest: "身份未核验",
+  };
+
+  function normalizeCodexPlusIdentityRole(value) {
+    const role = String(value || "").trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(codexPlusIdentityLabels, role) ? role : "guest";
+  }
+
+  function renderIdentityRole() {
+    const role = normalizeCodexPlusIdentityRole(codexPlusIdentity.role);
+    const label = codexPlusIdentityLabels[role];
+    document.querySelectorAll("[data-codex-backend-indicator]").forEach((indicator) => {
+      indicator.dataset.role = role;
+      indicator.title = label + " · " + (codexPlusBackendStatus.status === "ok" ? "后端已连接" : "后端连接检查中");
+    });
+  }
+
+  async function checkIdentityStatus() {
+    const seq = ++codexPlusIdentityCheckSeq;
+    let nextIdentity;
+    try {
+      nextIdentity = await withBackendTimeout(fetchIdentityStatusFromHelper({}));
+    } catch (error) {
+      sendCodexPlusDiagnostic("identity_helper_request_failed", {
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+      nextIdentity = { status: "failed" };
+    }
+    if (seq !== codexPlusIdentityCheckSeq) return;
+    const verifiedRole = nextIdentity?.status === "ok"
+      ? normalizeCodexPlusIdentityRole(nextIdentity.role)
+      : "guest";
+    codexPlusIdentity = {
+      role: verifiedRole === "guest" ? codexPlusIdentity.lastVerifiedRole : verifiedRole,
+      lastVerifiedRole: verifiedRole === "guest" ? codexPlusIdentity.lastVerifiedRole : verifiedRole,
+    };
+    renderIdentityRole();
+  }
 
   function setCodexPlusTriggerLabel(trigger) {
     if (!trigger) return;
@@ -2279,7 +2334,7 @@
       label.dataset.codexPlusTriggerLabel = "true";
       trigger.appendChild(label);
     }
-    label.textContent = `Codex++ ${codexPlusVersion}`;
+    label.textContent = `${codexPlusProductLabel} ${codexPlusVersion}`;
   }
 
   function ensureCodexPlusTriggerIndicator(trigger) {
@@ -2291,6 +2346,8 @@
       indicator.dataset.codexBackendIndicator = "true";
       trigger.prepend(indicator);
     }
+    indicator.textContent = "♛";
+    indicator.setAttribute("aria-hidden", "true");
     return indicator;
   }
 
@@ -2299,7 +2356,7 @@
     if (codexPlusBackendStatus.version) {
       codexPlusVersion = codexPlusBackendStatus.version;
       document.querySelectorAll("[data-codex-plus-version]").forEach((node) => {
-        node.textContent = `Codex++ ${codexPlusVersion}`;
+        node.textContent = `${codexPlusProductLabel} ${codexPlusVersion}`;
       });
       document.querySelectorAll(`#${codexPlusMenuId} button`).forEach(setCodexPlusTriggerLabel);
     }
@@ -2310,8 +2367,8 @@
     }
     document.querySelectorAll("[data-codex-backend-indicator]").forEach((indicator) => {
       indicator.dataset.status = status;
-      indicator.title = status === "ok" ? "后端已连接" : status === "checking" ? "正在检查后端" : "未连接";
     });
+    renderIdentityRole();
     refreshCodexServiceTierControls();
   }
 
@@ -2406,12 +2463,12 @@
     const overlay = document.createElement("div");
     overlay.className = "codex-plus-modal-overlay";
     overlay.innerHTML = `
-      <div class="codex-plus-modal-content" role="dialog" aria-modal="true" aria-label="Codework Codex++">
+      <div class="codex-plus-modal-content" role="dialog" aria-modal="true" aria-label="${codexPlusProductLabel}">
         <div class="codex-plus-modal-header">
-          <div class="codex-plus-modal-title"><span class="codex-plus-backend-indicator" data-codex-backend-indicator="true" data-status="checking"></span><span data-codex-plus-version="true">Codework Codex++ ${codexPlusVersion}</span></div>
+          <div class="codex-plus-modal-title"><span class="codex-plus-backend-indicator" data-codex-backend-indicator="true" data-status="checking" aria-hidden="true">♛</span><span data-codex-plus-version="true">${codexPlusProductLabel} ${codexPlusVersion}</span></div>
           <button type="button" class="codex-plus-modal-close" aria-label="关闭">×</button>
         </div>
-        <div class="codex-plus-tabs" role="tablist" aria-label="Codework Codex++">
+        <div class="codex-plus-tabs" role="tablist" aria-label="${codexPlusProductLabel}">
           <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="home" data-active="true">主页</button>
           <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="userScripts" data-active="false">用户脚本</button>
           <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="support" data-active="false">赞赏支持</button>
@@ -2521,7 +2578,7 @@
               <button type="button" class="codex-plus-action-button" data-codex-open-devtools="true">打开 DevTools</button>
             </div>
             <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">关于 Codework Codex++</div><div class="codex-plus-about">Codework Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>上游源码（MIT）：<a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a></div></div>
+              <div><div class="codex-plus-row-title">关于 ${codexPlusProductLabel}</div><div class="codex-plus-about">${codexPlusProductLabel} 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>客户端下载：<a href="http://115.190.199.191:20080/download" target="_blank" rel="noreferrer">http://115.190.199.191:20080/download</a></div></div>
             </div>
           </div>
           <div class="codex-plus-panel" data-codex-plus-panel="userScripts" hidden>
@@ -2540,7 +2597,7 @@
             </div>
           </div>
           <div class="codex-plus-panel" data-codex-plus-panel="support" hidden>
-            <div class="codex-plus-sponsor-text">感谢支持 Codework Codex++ 的维护与改进。</div>
+            <div class="codex-plus-sponsor-text">感谢支持 ${codexPlusProductLabel} 的维护与改进。</div>
             <div class="codex-plus-sponsor-grid">
               <div class="codex-plus-sponsor-card">
                 <div class="codex-plus-sponsor-card-title">微信赞赏</div>
@@ -2707,7 +2764,7 @@
       if (node !== keep) node.remove();
     });
     Array.from(document.querySelectorAll("button")).forEach((button) => {
-      if ((button.textContent || "").trim() === `Codex++ ${codexPlusVersion}` && !button.closest(`#${codexPlusMenuId}`)) {
+      if ((button.textContent || "").trim() === `${codexPlusProductLabel} ${codexPlusVersion}` && !button.closest(`#${codexPlusMenuId}`)) {
         button.remove();
       }
     });
@@ -2734,6 +2791,8 @@
       indicator.className = "codex-plus-backend-indicator";
       indicator.dataset.codexBackendIndicator = "true";
       indicator.dataset.status = codexPlusBackendStatus.status || "checking";
+      indicator.textContent = "♛";
+      indicator.setAttribute("aria-hidden", "true");
       trigger.prepend(indicator);
     }
     if (trigger.dataset.codexPlusTriggerInstalled === "5") return;
@@ -4426,6 +4485,25 @@
         return fallback;
       }
       throw error;
+    }
+  }
+
+  async function fetchIdentityStatusFromHelper(payload) {
+    try {
+      const response = await fetch(`${helperBase}/identity/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      });
+      const result = await response.json();
+      if (result?.status === "ok") {
+        sendCodexPlusDiagnostic("identity_helper_fallback_ok", {
+          role: normalizeCodexPlusIdentityRole(result.role),
+        });
+      }
+      return result;
+    } catch (error) {
+      return { status: "failed", message: "身份服务未连接" };
     }
   }
 
@@ -8739,6 +8817,9 @@
 
   void loadBackendSettingsForStartup();
   void loadCodexServiceTierState();
+  void checkIdentityStatus();
+  clearInterval(window.__codexPlusIdentityTimer);
+  window.__codexPlusIdentityTimer = setInterval(() => void checkIdentityStatus(), 1500);
   installUpstreamBranchDropdownAdapter();
   installUpstreamWorktreeNativeAdapter();
   scan();

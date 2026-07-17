@@ -16,17 +16,26 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getAvailableCodeworkRelease, getCodeworkUpdateSteps } from "./release";
+import { PrivateChat, type ChatFriend, type ChatMessage, type IncomingFriendRequest, type OutgoingFriendRequest, type FriendSearchResult, type PresenceStatus } from "./private-chat";
+import { getPresenceUpdateFeedback, shouldNotifyIncomingMessage } from "./private-chat-state";
+import { isAnnouncementUnread, normalizeAnnouncementFeed, type AnnouncementFeed, type ClientAnnouncement } from "./announcement";
+import { getCommunityDeleteConfirmation } from "./community-state";
+import { skillActionLabel, skillUsageGuideRows, type SkillUsageGuide } from "./skill-market";
 import {
   ArrowLeft,
   Bell,
   CheckCircle2,
   Copy,
+  Crown,
   Download,
   Edit3,
   GripVertical,
   Info,
   ExternalLink,
+  Gift,
   Hammer,
   KeyRound,
   Languages,
@@ -55,10 +64,16 @@ import {
 import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
 import {
   CODEWORK_API_BASE_URL,
+  CODEWORK_ACTIVITY_PORTAL_URL,
+  CODEWORK_CLIENT_DOWNLOAD_URL,
+  CODEWORK_FORGOT_PASSWORD_URL,
+  CODEWORK_OFFICIAL_ACCOUNT_LABEL,
   CODEWORK_PRODUCT_NAME,
   CODEWORK_PROVIDER_NAME,
+  CODEWORK_QQ_GROUP_URL,
+  CODEWORK_QQ_QR_URL,
   CODEWORK_REGISTER_URL,
-  UPSTREAM_SOURCE_URL,
+  CODEWORK_WECHAT_QR_URL,
 } from "./codework";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -76,8 +91,21 @@ import {
   type ModelWindowRow,
 } from "./model-windows";
 import { getLanguage, t, tf, toggleLanguage } from "@/i18n";
+import {
+  MEMBER_ACCESS_TOKEN_KEY,
+  MEMBER_REMEMBERED_CREDENTIALS_KEY,
+  normalizeMemberActivity,
+  normalizeMemberProfile,
+  getMemberIdentityDisplay,
+  getMemberRolePresentation,
+  readRememberedMemberCredentials,
+  type MemberActivity,
+  type MemberProfile,
+  type MemberRole,
+} from "./member";
 
 type Status = "ok" | "failed" | "not_implemented" | "not_checked" | string;
+const ANNOUNCEMENT_READ_STORAGE_KEY = "codework-announcement-read-revisions";
 
 type CommandResult<T> = T & {
   status: Status;
@@ -116,6 +144,80 @@ type PluginMarketplaceRepairResult = CommandResult<{
   initialized: boolean;
   configured: boolean;
   needsRepair: boolean;
+}>;
+
+type CodeworkReleaseResult = CommandResult<{
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  downloadUrl: string | null;
+  notes: string[];
+}>;
+
+type ChatGptInstallResult = CommandResult<{
+  installed: boolean;
+  wingetAvailable: boolean;
+  storeProductId: string | null;
+  shortcutCreated: boolean;
+}>;
+
+type CommunityComment = {
+  id: string;
+  authorUserId: string;
+  authorUsername: string;
+  content: string;
+  createdAt: number;
+  likeCount: number;
+  likedByCurrentUser: boolean;
+  replies: Array<{ id: string; authorUserId: string; authorUsername: string; content: string; createdAt: number }>;
+};
+
+function playIncomingMessageChime() {
+  try {
+    const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const context = new AudioContextConstructor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.11);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.09, context.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.24);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.25);
+    oscillator.addEventListener("ended", () => void context.close());
+  } catch {
+    // Notification sound is an enhancement and must not interrupt message delivery.
+  }
+}
+
+type CommunityResult = CommandResult<{
+  comments: CommunityComment[];
+  canModerate: boolean;
+}>;
+
+type InstallerProgress = {
+  stage: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  percent?: number;
+};
+
+type MemberProfileResult = CommandResult<MemberProfile>;
+
+type MemberLoginResult = CommandResult<{
+  accessToken: string;
+  profile: MemberProfile;
+}>;
+
+type MemberActivityResult = CommandResult<MemberActivity>;
+type AnnouncementResult = CommandResult<AnnouncementFeed>;
+
+type MemberPortalLinkResult = CommandResult<{
+  portalUrl: string;
 }>;
 
 type PluginMarketplaceStatusResult = CommandResult<{
@@ -269,7 +371,6 @@ type RelayProtocol = "responses" | "chatCompletions";
 type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate";
 const PROTOCOL_PROXY_BASE_URL = "http://127.0.0.1:57321/v1";
 const CHAT_UPSTREAM_BASE_URL_KEY = "codex_plus_chat_base_url";
-const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/BigPizzaV3/CodexPlusPlusScriptMarket";
 
 const emptyContextSelection = (): RelayContextSelection => ({
   mcpServers: [],
@@ -538,30 +639,28 @@ type InstallResult = CommandResult<{
   management_shortcut: { installed: boolean; path: string | null };
 }>;
 
-type ScriptMarketItem = {
+type SkillMarketItem = {
   id: string;
   name: string;
   description: string;
+  usage?: SkillUsageGuide;
   version: string;
   author: string;
   tags: string[];
   homepage: string;
-  script_url: string;
-  sha256: string;
   installed: boolean;
   installedVersion: string;
   updateAvailable: boolean;
 };
 
-type ScriptMarketResult = CommandResult<{
+type SkillMarketResult = CommandResult<{
   market: {
     status: string;
     message: string;
     indexUrl: string;
     updatedAt: string;
-    scripts: ScriptMarketItem[];
+    skills: SkillMarketItem[];
   };
-  user_scripts: UserScriptInventory;
 }>;
 
 function providerSyncProgressMessage(result: CommandResult<ProviderSyncPayload>): string {
@@ -586,32 +685,7 @@ function providerSyncTargetLabel(target: ProviderSyncTargetOption): string {
   return [...labels, ...current].join(" / ") || t("发现");
 }
 
-function syncMarketInstalledState(current: ScriptMarketResult | null, userScripts: UserScriptInventory): ScriptMarketResult | null {
-  if (!current) return current;
-  const installed = new Map(
-    (userScripts.scripts ?? [])
-      .filter((script) => script.market_id)
-      .map((script) => [script.market_id || "", script.version || ""]),
-  );
-  return {
-    ...current,
-    user_scripts: userScripts,
-    market: {
-      ...current.market,
-      scripts: current.market.scripts.map((script) => {
-        const installedVersion = installed.get(script.id) || "";
-        return {
-          ...script,
-          installed: Boolean(installedVersion),
-          installedVersion,
-          updateAvailable: Boolean(installedVersion) && installedVersion !== script.version,
-        };
-      }),
-    },
-  };
-}
-
-type Route = "overview" | "relay" | "sessions" | "context" | "enhance" | "visualTheme" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
+type Route = "overview" | "account" | "activity" | "community" | "announcements" | "announcementManagement" | "updates" | "downloadChatGpt" | "relay" | "sessions" | "context" | "enhance" | "visualTheme" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 type VisualThemeTokens = {
@@ -755,13 +829,20 @@ function writeVisualThemeManifestCache(serviceUrl: string, manifest: VisualTheme
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
+  { id: "account", label: "账户中心", icon: Crown },
+  { id: "activity", label: "活动中心", icon: Gift },
+  { id: "community", label: "超话", icon: MessageCircle },
+  { id: "announcements", label: "公告中心", icon: Bell },
+  { id: "announcementManagement", label: "公告管理", icon: Edit3 },
+  { id: "updates", label: "版本更新", icon: Download },
+  { id: "downloadChatGpt", label: "下载官方 ChatGPT", icon: Download },
   { id: "relay", label: t("供应商配置"), icon: KeyRound },
   { id: "sessions", label: t("会话管理"), icon: MessageCircle },
   { id: "context", label: t("工具与插件"), icon: Network },
   { id: "enhance", label: t("Codex增强"), icon: Hammer },
   { id: "visualTheme", label: "视觉个性化", icon: Palette, badge: "PRO" },
   { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink },
-  { id: "userScripts", label: t("脚本市场"), icon: FileCode2 },
+  { id: "userScripts", label: "Skill 市场", icon: FileCode2 },
   { id: "maintenance", label: t("安装维护"), icon: Wrench },
   { id: "about", label: t("关于"), icon: Info },
   { id: "settings", label: t("设置"), icon: Settings },
@@ -884,7 +965,7 @@ export function App() {
   const [logs, setLogs] = useState<LogsResult | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [watcher, setWatcher] = useState<WatcherResult | null>(null);
-  const [scriptMarket, setScriptMarket] = useState<ScriptMarketResult | null>(null);
+  const [skillMarket, setSkillMarket] = useState<SkillMarketResult | null>(null);
   const [launchForm, setLaunchForm] = useState({
     appPath: "",
     debugPort: "9229",
@@ -913,8 +994,52 @@ export function App() {
   const [selectedProviderSyncTarget, setSelectedProviderSyncTarget] = useState("");
   const [removeOwnedData, setRemoveOwnedData] = useState(false);
   const [relaySwitching, setRelaySwitching] = useState(false);
+  const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
+  const [chatFriends, setChatFriends] = useState<ChatFriend[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [incomingFriendRequests, setIncomingFriendRequests] = useState<IncomingFriendRequest[]>([]);
+  const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<OutgoingFriendRequest[]>([]);
+  const [chatSelfStatus, setChatSelfStatus] = useState<PresenceStatus>("online");
+  const [chatNotificationPulse, setChatNotificationPulse] = useState(0);
+  const chatUnreadCountsRef = useRef<Map<string, number>>(new Map());
+  const chatPresenceRef = useRef<PresenceStatus>("online");
+  const chatInitializedRef = useRef(false);
+  const [memberActivity, setMemberActivity] = useState<MemberActivity | null>(null);
+  const [memberGateReady, setMemberGateReady] = useState(false);
+  const [memberLoginApproved, setMemberLoginApproved] = useState(false);
+  const [releaseResult, setReleaseResult] = useState<CodeworkReleaseResult | null>(null);
+  const [releaseProgress, setReleaseProgress] = useState<InstallerProgress | null>(null);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+  const [chatGptResult, setChatGptResult] = useState<ChatGptInstallResult | null>(null);
+  const [chatGptProgress, setChatGptProgress] = useState<InstallerProgress | null>(null);
+  const [community, setCommunity] = useState<CommunityResult | null>(null);
+  const [communityDraft, setCommunityDraft] = useState("");
+  const [announcementFeed, setAnnouncementFeed] = useState<AnnouncementFeed | null>(null);
+  const [announcementReadKeys, setAnnouncementReadKeys] = useState<Set<string>>(() => {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(ANNOUNCEMENT_READ_STORAGE_KEY) || "[]");
+      return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+    } catch { return new Set(); }
+  });
+  const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<Set<string>>(() => new Set());
+  const [announcementDraft, setAnnouncementDraft] = useState<{ title: string; body: string; priority: "normal" | "important" | "urgent"; isPinned: boolean }>({ title: "", body: "", priority: "normal", isPinned: false });
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null);
 
   const call = <T,>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args);
+  const availableRelease = getAvailableCodeworkRelease(releaseResult);
+  const activeMemberIdentity = memberProfile ? getMemberIdentityDisplay(memberProfile) : null;
+  const showWorkspaceUpdateNotice = availableRelease?.latestVersion !== dismissedUpdateVersion;
+  const unreadAnnouncementCount = announcementFeed?.announcements.filter((announcement) => isAnnouncementUnread(announcement, announcementReadKeys)).length ?? 0;
+  const latestAnnouncement = announcementFeed?.announcements.find((announcement) => !dismissedAnnouncementIds.has(announcement.id)) ?? null;
+
+  const markAnnouncementRead = (announcement: ClientAnnouncement) => {
+    const key = `${announcement.id}:${announcement.revision}`;
+    setAnnouncementReadKeys((current) => {
+      const next = new Set(current).add(key);
+      window.localStorage.setItem(ANNOUNCEMENT_READ_STORAGE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const logDiagnostic = (event: string, detail: Record<string, unknown> = {}) => {
     void invoke("write_diagnostic_event", { event, detail }).catch(() => {});
@@ -927,6 +1052,300 @@ export function App() {
       showNotice(t("调用失败"), stringifyError(error), "failed");
       return null;
     }
+  };
+
+  const refreshMemberProfile = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) {
+      setMemberProfile(null);
+      return null;
+    }
+    try {
+      const result = await call<MemberProfileResult>("client_profile", { accessToken });
+      const profile = isSuccessStatus(result.status) ? normalizeMemberProfile(result) : null;
+      if (!profile) {
+        window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+        setMemberProfile(null);
+        return null;
+      }
+      setMemberProfile(profile);
+      void call("sync_client_identity_window_icon", { activeRole: profile.activeRole }).catch(() => {});
+      return profile;
+    } catch {
+      window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+      setMemberProfile(null);
+      return null;
+    }
+  };
+
+  const changeMemberRole = async (activeRole: MemberRole) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken || !memberProfile?.actualAdmin) return;
+    const result = await run(() => call<CommandResult<{ identity: { activeRole: MemberRole; actualAdmin: boolean } }>>("update_client_active_role", { accessToken, activeRole }));
+    if (!result || !isSuccessStatus(result.status)) return;
+    setMemberProfile((current) => current ? { ...current, activeRole: result.identity.activeRole, actualAdmin: result.identity.actualAdmin } : current);
+    const iconResult = await run(() => call<CommandResult<{ applied: boolean }>>("sync_client_identity_window_icon", { activeRole: result.identity.activeRole }));
+    if (iconResult && !isSuccessStatus(iconResult.status)) showNotice("身份皇冠", iconResult.message, iconResult.status);
+    await refreshMemberActivity();
+  };
+
+  const checkCodeworkRelease = async () => {
+    setReleaseProgress({ stage: "checking" });
+    const result = await run(() => call<CodeworkReleaseResult>("check_codework_release"));
+    if (result) setReleaseResult(result);
+    setReleaseProgress(null);
+    return result;
+  };
+
+  const installCodeworkRelease = async () => {
+    const confirmed = await confirmSessionDelete("发现新版本", "将下载 Codework 官方安装包。下载完成后客户端会自动退出、静默覆盖安装并重新启动，已有配置会保留。现在开始更新吗？");
+    if (!confirmed) return;
+    setReleaseProgress({ stage: "downloading", downloadedBytes: 0 });
+    const result = await run(() => call<CodeworkReleaseResult>("install_codework_release"));
+    if (result) setReleaseResult(result);
+  };
+
+  const refreshChatGptStatus = async () => {
+    setChatGptProgress({ stage: "checking" });
+    const result = await run(() => call<ChatGptInstallResult>("get_chatgpt_install_status"));
+    if (result) setChatGptResult(result);
+    setChatGptProgress(null);
+    return result;
+  };
+
+  const installOfficialChatGpt = async () => {
+    const confirmed = await confirmSessionDelete("安装官方 ChatGPT", "将通过 Microsoft Store 官方渠道安装 OpenAI 的 ChatGPT。系统可能要求登录 Microsoft Store 或确认许可。现在开始吗？");
+    if (!confirmed) return;
+    setChatGptProgress({ stage: "installing" });
+    const result = await run(() => call<ChatGptInstallResult>("install_official_chatgpt"));
+    if (result) setChatGptResult(result);
+  };
+
+  const refreshMemberActivity = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) {
+      setMemberActivity(null);
+      return null;
+    }
+    try {
+      const result = await call<MemberActivityResult>("client_activity", { accessToken });
+      const activity = isSuccessStatus(result.status) ? normalizeMemberActivity(result) : null;
+      setMemberActivity(activity);
+      return activity;
+    } catch {
+      setMemberActivity(null);
+      return null;
+    }
+  };
+
+  const refreshCommunity = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) {
+      setCommunity(null);
+      return null;
+    }
+    const result = await run(() => call<CommunityResult>("community_comments", { accessToken }));
+    if (result) setCommunity(result);
+    return result;
+  };
+
+  const refreshPrivateFriends = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<{ friends: ChatFriend[]; incomingRequests: IncomingFriendRequest[]; outgoingRequests: OutgoingFriendRequest[]; selfStatus: PresenceStatus }>>("list_private_friends", { accessToken }));
+    if (result && isSuccessStatus(result.status)) {
+      const nextUnreadCounts = new Map(result.friends.map((friend) => [friend.userId, friend.unreadCount]));
+      const notifyingFriend = result.friends.find((friend) => shouldNotifyIncomingMessage(chatPresenceRef.current, chatUnreadCountsRef.current.get(friend.userId) ?? 0, friend.unreadCount));
+      if (chatInitializedRef.current && notifyingFriend) {
+        setChatNotificationPulse((value) => value + 1);
+        void getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(() => {});
+        playIncomingMessageChime();
+        showNotice("新消息", `${notifyingFriend.identityLabel || notifyingFriend.username} 发来一条新消息`, "ok");
+      }
+      chatUnreadCountsRef.current = nextUnreadCounts;
+      chatInitializedRef.current = true;
+      setChatFriends(result.friends);
+      setIncomingFriendRequests(result.incomingRequests);
+      setOutgoingFriendRequests(result.outgoingRequests ?? []);
+      setChatSelfStatus(result.selfStatus);
+    }
+  };
+  const changePrivatePresence = async (status: PresenceStatus) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const previousStatus = chatSelfStatus;
+    setChatSelfStatus(status);
+    const result = await run(() => call<CommandResult<{ status: PresenceStatus }>>("update_private_presence", { accessToken, status }));
+    if (result && isSuccessStatus(result.status)) {
+      setChatSelfStatus(result.status);
+      showNotice("在线状态", getPresenceUpdateFeedback(result.status), "ok");
+    } else {
+      setChatSelfStatus(previousStatus);
+      if (result) showNotice("在线状态", result.message, result.status);
+    }
+  };
+  const loadPrivateMessages = async (friendUserId: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<{ messages: ChatMessage[] }>>("load_private_messages", { accessToken, friendUserId }));
+    if (result && isSuccessStatus(result.status)) setChatMessages(result.messages);
+  };
+  const sendPrivateMessage = async (friendUserId: string, content: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<{ message: ChatMessage }>>("send_private_message", { accessToken, friendUserId, content }));
+    if (result && isSuccessStatus(result.status)) await loadPrivateMessages(friendUserId);
+  };
+  const sendPrivateAttachment = async (friendUserId: string, attachment: { dataBase64: string; fileName: string; mimeType: string }) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<{ message: ChatMessage }>>("send_private_attachment", {
+      accessToken,
+      friendUserId,
+      dataBase64: attachment.dataBase64,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+    }));
+    if (result && isSuccessStatus(result.status)) await loadPrivateMessages(friendUserId);
+  };
+  const respondToFriendRequest = async (requestId: string, accept: boolean) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<unknown>>("respond_to_friend_request", { accessToken, requestId, accept }));
+    if (result && isSuccessStatus(result.status)) await refreshPrivateFriends();
+  };
+  const requestFriend = async (userId: string, username: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<unknown>>("send_friend_request", { accessToken, userId, username }));
+    if (result && isSuccessStatus(result.status)) {
+      await refreshPrivateFriends();
+      showNotice("好友申请", "已发送好友申请", "ok");
+    }
+  };
+  const cancelFriendRequest = async (friendUserId: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<{ cancelled: boolean }>>("cancel_friend_request", { accessToken, friendUserId }));
+    if (result && isSuccessStatus(result.status)) {
+      await refreshPrivateFriends();
+      showNotice("好友申请", "已取消好友申请", "ok");
+    } else if (result) showNotice("好友申请", result.message, result.status);
+  };
+  const searchFriend = async (query: string): Promise<FriendSearchResult | null> => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return null;
+    const result = await run(() => call<CommandResult<{ result: FriendSearchResult | null }>>("search_registered_friend", { accessToken, query }));
+    if (result && isSuccessStatus(result.status)) return result.result;
+    if (result) showNotice("搜索好友", result.message, result.status);
+    return null;
+  };
+
+  const refreshAnnouncements = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) {
+      setAnnouncementFeed(null);
+      return null;
+    }
+    const result = await run(() => call<AnnouncementResult>("client_announcements", { accessToken }));
+    const feed = result && isSuccessStatus(result.status) ? normalizeAnnouncementFeed(result) : null;
+    if (feed) setAnnouncementFeed(feed);
+    return feed;
+  };
+
+  const saveAnnouncement = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken || !announcementFeed?.canManage) return;
+    const result = await run(() => call<CommandResult<{ announcement: ClientAnnouncement }>>("save_client_announcement", {
+      accessToken,
+      announcementId: editingAnnouncementId,
+      payload: { ...announcementDraft, status: "published" },
+    }));
+    if (result && isSuccessStatus(result.status)) {
+      setAnnouncementDraft({ title: "", body: "", priority: "normal", isPinned: false });
+      setEditingAnnouncementId(null);
+      await refreshAnnouncements();
+    } else if (result) showNotice("公告管理", result.message, result.status);
+  };
+
+  const editAnnouncement = (announcement: ClientAnnouncement) => {
+    setEditingAnnouncementId(announcement.id);
+    setAnnouncementDraft({ title: announcement.title, body: announcement.body, priority: announcement.priority, isPinned: announcement.isPinned });
+    void navigate("announcementManagement");
+  };
+
+  const withdrawAnnouncement = async (announcementId: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken || !announcementFeed?.canManage) return;
+    const result = await run(() => call<CommandResult<{ announcement: ClientAnnouncement }>>("withdraw_client_announcement", { accessToken, announcementId }));
+    if (result && isSuccessStatus(result.status)) await refreshAnnouncements();
+    else if (result) showNotice("公告管理", result.message, result.status);
+  };
+
+  const publishCommunityComment = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const content = communityDraft.trim();
+    if (!accessToken || !content) return;
+    const result = await run(() => call<CommandResult<{ comment: CommunityComment }>>("post_community_comment", { accessToken, content }));
+    if (result && isSuccessStatus(result.status)) {
+      setCommunityDraft("");
+      await refreshCommunity();
+    } else if (result) showNotice("超话", result.message, result.status);
+  };
+
+  const removeCommunityComment = async (commentId: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const confirmation = getCommunityDeleteConfirmation();
+    if (!(await confirmSessionDelete(confirmation.title, confirmation.message))) return;
+    const result = await run(() => call<CommandResult<{ deleted: boolean }>>("delete_community_comment", { accessToken, commentId }));
+    if (result && isSuccessStatus(result.status)) await refreshCommunity();
+    else if (result) showNotice("超话", result.message, result.status);
+  };
+
+  const toggleCommunityLike = async (commentId: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) return;
+    const result = await run(() => call<CommandResult<unknown>>("toggle_community_comment_like", { accessToken, commentId }));
+    if (result && isSuccessStatus(result.status)) await refreshCommunity();
+  };
+
+  const replyCommunityComment = async (commentId: string, content: string) => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken || !content.trim()) return;
+    const result = await run(() => call<CommandResult<unknown>>("reply_to_community_comment", { accessToken, commentId, content: content.trim() }));
+    if (result && isSuccessStatus(result.status)) await refreshCommunity();
+  };
+
+  const loginMember = async (username: string, password: string) => {
+    const result = await run(() => call<MemberLoginResult>("client_login", { username, password }));
+    if (!result || !isSuccessStatus(result.status)) {
+      if (result) showNotice("账户登录", result.message, result.status);
+      return false;
+    }
+    const accessToken = result.accessToken?.trim();
+    const profile = normalizeMemberProfile(result.profile);
+    if (!accessToken || !profile) {
+      showNotice("账户登录", "会员身份数据无效，请稍后重试。", "failed");
+      return false;
+    }
+    window.localStorage.setItem(MEMBER_ACCESS_TOKEN_KEY, accessToken);
+    setMemberProfile(profile);
+    setMemberLoginApproved(true);
+    setRoute("account");
+    void refreshMemberActivity();
+    void refreshAnnouncements();
+    void refreshPrivateFriends();
+    showNotice("账户登录", profile.tier === "supreme" ? "至尊 VIP 身份已核验。" : "普通 VIP 身份已核验。", "ok");
+    return true;
+  };
+
+  const logoutMember = () => {
+    window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+    setMemberProfile(null);
+    setMemberActivity(null);
+    setAnnouncementFeed(null);
+    setMemberLoginApproved(false);
   };
 
   const refreshOverview = async (silent = false) => {
@@ -960,21 +1379,19 @@ export function App() {
     return null;
   };
 
-  const refreshScriptMarket = async (silent = false) => {
-    const result = await run(() => call<ScriptMarketResult>("refresh_script_market"));
+  const refreshSkillMarket = async (silent = false) => {
+    const result = await run(() => call<SkillMarketResult>("refresh_skill_market"));
     if (result) {
-      setScriptMarket(result);
-      setSettings((current) => (current ? { ...current, user_scripts: result.user_scripts } : current));
-      if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("脚本市场"), result, { silentSuccess: true });
+      setSkillMarket(result);
+      if (!silent || !isSuccessStatus(result.status)) showResultNotice("Skill 市场", result, { silentSuccess: true });
     }
   };
 
-  const installMarketScript = async (id: string) => {
-    const result = await run(() => call<ScriptMarketResult>("install_market_script", { id }));
+  const installMarketSkill = async (id: string) => {
+    const result = await run(() => call<SkillMarketResult>("install_market_skill", { id }));
     if (result) {
-      setScriptMarket(result);
-      setSettings((current) => (current ? { ...current, user_scripts: result.user_scripts } : current));
-      showResultNotice(t("脚本市场"), result);
+      setSkillMarket(result);
+      showResultNotice("Skill 市场", result);
     }
   };
 
@@ -982,7 +1399,6 @@ export function App() {
     const result = await run(() => call<SettingsResult>("set_user_script_enabled", { key, enabled }));
     if (result) {
       setSettings(result);
-      setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地脚本"), result);
     }
   };
@@ -994,7 +1410,6 @@ export function App() {
     const result = await run(() => call<SettingsResult>("delete_user_script", { key }));
     if (result) {
       setSettings(result);
-      setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地脚本"), result);
     }
   };
@@ -1150,6 +1565,20 @@ export function App() {
       });
     });
 
+  useEffect(() => {
+    let unlistenRelease: (() => void) | undefined;
+    let unlistenChatGpt: (() => void) | undefined;
+    void listen<InstallerProgress>("codework-release-progress", (event) => setReleaseProgress(event.payload)).then((dispose) => { unlistenRelease = dispose; });
+    void listen<InstallerProgress>("chatgpt-install-progress", (event) => setChatGptProgress(event.payload)).then((dispose) => { unlistenChatGpt = dispose; });
+    void checkCodeworkRelease();
+    const releaseTimer = window.setInterval(() => void checkCodeworkRelease(), 6 * 60 * 60 * 1000);
+    return () => {
+      unlistenRelease?.();
+      unlistenChatGpt?.();
+      window.clearInterval(releaseTimer);
+    };
+  }, []);
+
   const deleteLocalSession = async (session: LocalSession) => {
     const title = session.title || session.id;
     const confirmed = await confirmSessionDelete(t("删除会话"), tf("删除会话“{0}”？此操作会删除本地数据库记录和 rollout 文件，并创建备份。", [title]));
@@ -1246,6 +1675,10 @@ export function App() {
   const navigate = async (next: Route) => {
     setRoute(next);
     if (next === "overview") await refreshOverview(true);
+    if (next === "account") await refreshMemberProfile();
+    if (next === "activity") await refreshMemberActivity();
+    if (next === "community") await refreshCommunity();
+    if (next === "announcements" || next === "announcementManagement") await refreshAnnouncements();
     if (next === "relay") {
       await refreshSettings(true);
       await refreshRelay(true);
@@ -1269,8 +1702,7 @@ export function App() {
     }
     if (next === "settings") await refreshSettings(true);
     if (next === "userScripts") {
-      await refreshSettings(true);
-      await refreshScriptMarket(true);
+      await refreshSkillMarket(true);
     }
     if (next === "about") {
       await refreshOverview(true);
@@ -1836,6 +2268,20 @@ export function App() {
     }
   };
 
+  const openMemberActivityPortal = async () => {
+    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    if (!accessToken) {
+      showNotice("需要登录", "请先登录 ♛Codework AI 官方账号，再进入活动官网。", "failed");
+      return;
+    }
+    const result = await run(() => call<MemberPortalLinkResult>("client_portal_link", { accessToken }));
+    if (!result || !isSuccessStatus(result.status)) {
+      showResultNotice("活动官网", result ?? { status: "failed", message: "活动登录跳转暂时不可用。" });
+      return;
+    }
+    await openExternalUrl(result.portalUrl);
+  };
+
   const showNotice = (title: string, message: string, status?: Status) => {
     setNotice({ title, message: t(message), status });
   };
@@ -1867,6 +2313,27 @@ export function App() {
       await refreshPendingProviderImport(true);
       await refreshRemotePluginMarketplace(true);
     })();
+  }, []);
+
+  useEffect(() => {
+    void refreshMemberProfile().finally(() => setMemberGateReady(true));
+  }, []);
+
+  useEffect(() => {
+    chatPresenceRef.current = chatSelfStatus;
+  }, [chatSelfStatus]);
+
+  useEffect(() => {
+    if (!memberLoginApproved) return;
+    void refreshPrivateFriends();
+    const timer = window.setInterval(() => void refreshPrivateFriends(), 8000);
+    return () => window.clearInterval(timer);
+  }, [memberLoginApproved]);
+
+  useEffect(() => {
+    void refreshAnnouncements();
+    const timer = window.setInterval(() => void refreshAnnouncements(), 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -2009,8 +2476,8 @@ export function App() {
       importCcsProviders,
       refreshLiveContextEntries,
       syncLiveContextEntries,
-      refreshScriptMarket,
-      installMarketScript,
+      refreshSkillMarket,
+      installMarketSkill,
       setUserScriptEnabled,
       deleteUserScript,
       refreshLocalSessions,
@@ -2060,7 +2527,7 @@ export function App() {
     <div className={`shell ${theme}`}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">C++</div>
+          <div className={`brand-mark ${activeMemberIdentity?.tone ?? "guest"}`}><Crown aria-label="Codework 身份皇冠" className="brand-crown" /></div>
           <div className="brand-copy">
             <div className="brand-title-row">
               <div className="brand-title">{CODEWORK_PRODUCT_NAME}</div>
@@ -2069,8 +2536,9 @@ export function App() {
           </div>
         </div>
         <nav className="nav">
-          {routes.map((item) => {
+          {routes.filter((item) => item.id !== "announcementManagement" || announcementFeed?.canManage).map((item) => {
             const Icon = item.icon;
+            const updateBadge = item.id === "updates" ? (availableRelease ? `NEW ${availableRelease.latestVersion}` : releaseResult?.currentVersion ?? overview?.current_version ?? "") : item.badge;
             return (
             <button
               className={`nav-item ${route === item.id ? "active" : ""}`}
@@ -2083,11 +2551,14 @@ export function App() {
                 <Icon className="h-4 w-4" aria-hidden="true" />
               </span>
               <span className="nav-label">{item.label}</span>
-              {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
+              {item.id === "announcements" && unreadAnnouncementCount ? <span className="nav-update-dot announcement-unread-dot" aria-label="有未读公告" /> : null}
+              {item.id === "updates" && availableRelease ? <span className="nav-update-dot" aria-label="发现新版本" /> : null}
+              {updateBadge ? <span className={`nav-badge ${item.id === "updates" && availableRelease ? "update-available" : ""}`}>{updateBadge}</span> : null}
             </button>
           );
           })}
         </nav>
+        <div className="sidebar-copyright">© 2026 Xiaoshuai</div>
       </aside>
       <main className="workspace">
         <header className="topbar" key={`topbar-${route}`}>
@@ -2112,6 +2583,10 @@ export function App() {
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
+            <button className={`member-badge ${memberProfile?.activeRole ?? "guest"}`} onClick={() => void navigate("account")} type="button">
+              <Crown className="h-4 w-4" aria-hidden="true" />
+              <span>{memberProfile ? `${memberProfile.username} · ${activeMemberIdentity?.label}` : "会员登录"}</span>
+            </button>
             <Button onClick={() => void actions.restart()} title={t("重启 Codex++")} variant="outline">
               <Rocket className="h-4 w-4" />
               {t("重启 Codex++")}
@@ -2121,6 +2596,27 @@ export function App() {
             </Button>
           </div>
         </header>
+        {showWorkspaceUpdateNotice && availableRelease ? (
+          <section className="workspace-update-notice" aria-label="客户端更新提醒">
+            <div className="workspace-update-icon"><Download className="h-5 w-5" aria-hidden="true" /></div>
+            <div className="workspace-update-copy">
+              <strong>发现新版本 {availableRelease.latestVersion}</strong>
+              <span>现可立即更新，更新后将保留本机配置。</span>
+            </div>
+            <div className="workspace-update-actions">
+              <Button onClick={() => void navigate("updates")}><Download className="h-4 w-4" />立即查看</Button>
+              <button className="workspace-update-dismiss" onClick={() => setDismissedUpdateVersion(availableRelease.latestVersion)} type="button">稍后提醒</button>
+            </div>
+          </section>
+        ) : null}
+        {latestAnnouncement ? (
+          <section className={`workspace-announcement ${latestAnnouncement.priority}`} aria-label="客户端公告">
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            <div><strong>{latestAnnouncement.title}</strong><span>{latestAnnouncement.body}</span></div>
+            <Button onClick={() => { markAnnouncementRead(latestAnnouncement); void navigate("announcements"); }} size="sm" variant="outline">查看</Button>
+            <button className="workspace-update-dismiss" onClick={() => setDismissedAnnouncementIds((current) => new Set(current).add(latestAnnouncement.id))} type="button">稍后</button>
+          </section>
+        ) : null}
         <section className="screen" key={route}>
           {route === "overview" ? (
             <OverviewScreen
@@ -2129,6 +2625,21 @@ export function App() {
               actions={actions}
             />
           ) : null}
+          {route === "account" ? (
+            <MemberAccountScreen
+              profile={memberProfile}
+              onLogin={loginMember}
+              onLogout={logoutMember}
+              onRefresh={refreshMemberProfile}
+              onChangeActiveRole={changeMemberRole}
+            />
+          ) : null}
+          {route === "activity" ? <ActivityCenterScreen activity={memberActivity} onOpenPortal={openMemberActivityPortal} onRefresh={refreshMemberActivity} /> : null}
+          {route === "community" ? <CommunityScreen community={community} profile={memberProfile} draft={communityDraft} onDraftChange={setCommunityDraft} onPublish={publishCommunityComment} onDelete={removeCommunityComment} onLike={toggleCommunityLike} onReply={replyCommunityComment} onRefresh={refreshCommunity} /> : null}
+          {route === "announcements" ? <AnnouncementCenterScreen feed={announcementFeed} onRead={markAnnouncementRead} onRefresh={refreshAnnouncements} /> : null}
+          {route === "announcementManagement" && announcementFeed?.canManage ? <AnnouncementManagementScreen draft={announcementDraft} editingId={editingAnnouncementId} feed={announcementFeed} onDraftChange={setAnnouncementDraft} onEdit={editAnnouncement} onPublish={saveAnnouncement} onWithdraw={withdrawAnnouncement} /> : null}
+          {route === "updates" ? <ReleaseNotesScreen release={releaseResult} progress={releaseProgress} onCheck={checkCodeworkRelease} onInstall={installCodeworkRelease} /> : null}
+          {route === "downloadChatGpt" ? <OfficialChatGptScreen result={chatGptResult} progress={chatGptProgress} onRefresh={refreshChatGptStatus} onInstall={installOfficialChatGpt} /> : null}
           {route === "relay" ? (
             <RelayScreen
               settings={settings}
@@ -2175,7 +2686,7 @@ export function App() {
           {route === "zedRemote" ? (
             <ZedRemoteScreen projects={zedRemoteProjects} form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
           ) : null}
-          {route === "userScripts" ? <UserScriptsScreen settings={settings} market={scriptMarket} actions={actions} /> : null}
+          {route === "userScripts" ? <UserScriptsScreen market={skillMarket} actions={actions} /> : null}
           {route === "maintenance" ? (
             <MaintenanceScreen
               overview={overview}
@@ -2228,6 +2739,13 @@ export function App() {
           onDismiss={() => void dismissPendingProviderImport()}
         />
       ) : null}
+       {memberLoginApproved && memberProfile ? <PrivateChat friends={chatFriends} messages={chatMessages} notificationPulse={chatNotificationPulse} onCancelRequest={cancelFriendRequest} onLoadMessages={(id) => void loadPrivateMessages(id)} onPresenceChange={changePrivatePresence} onRequest={requestFriend} onRespond={(id, accept) => void respondToFriendRequest(id, accept)} onSearch={searchFriend} onSend={(id, content) => void sendPrivateMessage(id, content)} onSendAttachment={(id, attachment) => sendPrivateAttachment(id, attachment)} outgoingRequests={outgoingFriendRequests} requests={incomingFriendRequests} selfId={memberProfile.userId} selfIsAdmin={memberProfile.actualAdmin} selfStatus={chatSelfStatus} /> : null}
+      <MemberLoginGate
+        loading={!memberGateReady}
+        onLogin={loginMember}
+        onOpenExternalUrl={actions.openExternalUrl}
+        visible={!memberLoginApproved}
+      />
     </div>
   );
 }
@@ -2263,8 +2781,8 @@ type Actions = {
   importCcsProviders: () => Promise<void>;
   refreshLiveContextEntries: () => Promise<LiveContextEntriesResult | null>;
   syncLiveContextEntries: (settings: BackendSettings, silent?: boolean) => Promise<LiveContextEntriesResult | null>;
-  refreshScriptMarket: () => Promise<void>;
-  installMarketScript: (id: string) => Promise<void>;
+  refreshSkillMarket: () => Promise<void>;
+  installMarketSkill: (id: string) => Promise<void>;
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
   deleteUserScript: (key: string) => Promise<void>;
   refreshLocalSessions: () => Promise<LocalSessionsResult | null>;
@@ -2307,6 +2825,420 @@ type Actions = {
   toggleTheme: () => void;
   checkHealth: () => Promise<void>;
 };
+
+function MemberAccountScreen({
+  profile,
+  onLogin,
+  onLogout,
+  onRefresh,
+  onChangeActiveRole,
+}: {
+  profile: MemberProfile | null;
+  onLogin: (username: string, password: string) => Promise<boolean>;
+  onLogout: () => void;
+  onRefresh: () => Promise<MemberProfile | null>;
+  onChangeActiveRole: (role: MemberRole) => Promise<void>;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const rolePresentation = profile ? getMemberRolePresentation(profile.activeRole) : null;
+  const roleOptions: MemberRole[] = ["administrator", "founder", "director", "supreme", "vip"];
+
+  const submit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const loggedIn = await onLogin(username, password);
+      if (loggedIn) setPassword("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <Panel className={`member-identity-card ${profile?.activeRole ?? "guest"}`}>
+        <CardContent>
+          <div className="member-identity-layout">
+            <div className={`member-crown-wrap ${rolePresentation?.tone ?? "guest"}`}><Crown className="member-crown" aria-hidden="true" /></div>
+            <div>
+              <p className="eyebrow">Codework 会员身份</p>
+              <h2>{profile ? (rolePresentation?.label ?? "会员") : "登录以核验会员身份"}</h2>
+              <p>
+                {profile
+                  ? `${profile.username} · 身份来自抽奖系统现有资格规则。`
+                  : "登录后会从抽奖系统核验会员资格；视觉个性化 Pro 不参与此身份判断。"}
+              </p>
+            </div>
+            {profile && rolePresentation ? <span className={`member-tier-chip ${rolePresentation.tone}`}>{rolePresentation.label}</span> : null}
+          </div>
+        </CardContent>
+      </Panel>
+      {profile?.actualAdmin ? (
+        <Panel className={`identity-switch-card ${profile.activeRole}`}>
+          <CardHead title="管理员身份体验转换" detail="管理员专属：切换后会真实同步到服务器身份展示，同时保留管理员管理权限。" />
+          <CardContent>
+            <div className="identity-switch-layout">
+              <div>
+                <p className="eyebrow">CURRENT IDENTITY</p>
+                <h3>{rolePresentation?.label ?? "平台执掌者"}</h3>
+                <p>这里沿用抽奖系统的身份体验：创始人偏暗红质感，总监偏银蓝质感，至尊 VIP 为金色皇冠，普通 VIP 为蓝色皇冠。</p>
+              </div>
+              <div className="identity-role-grid">
+                {roleOptions.map((role) => {
+                  const item = getMemberRolePresentation(role);
+                  return (
+                    <Button
+                      className={`identity-role-button ${item.tone}`}
+                      key={role}
+                      onClick={() => void onChangeActiveRole(role)}
+                      size="sm"
+                      variant={profile.activeRole === role ? "default" : "outline"}
+                    >
+                      {item.label}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Panel>
+      ) : null}
+      {profile ? (
+        <Panel>
+          <CardHead title="已登录账户" detail="客户端只保存登录令牌，不保存密码；打开客户端时会自动重新核验。" />
+          <CardContent>
+            <div className="member-details">
+              <div><span>账户</span><strong>{profile.username}</strong></div>
+              <div><span>身份</span><strong>{rolePresentation ? `${rolePresentation.label} · 当前展示身份` : "会员身份"}</strong></div>
+            </div>
+            <Toolbar>
+              <Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />重新核验</Button>
+              <Button onClick={onLogout} variant="outline">退出登录</Button>
+            </Toolbar>
+          </CardContent>
+        </Panel>
+      ) : (
+        <Panel>
+          <CardHead title="账户登录" detail="使用抽奖系统已有账户登录，不会跳转浏览器。" />
+          <CardContent>
+            <form className="member-login-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+              <Field label="账号">
+                <Input autoComplete="username" onChange={(event) => setUsername(event.target.value)} placeholder="输入抽奖系统账号" value={username} />
+              </Field>
+              <Field label="密码">
+                <Input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="输入密码" type="password" value={password} />
+              </Field>
+              <Toolbar>
+                <Button disabled={submitting || !username.trim() || !password} type="submit">
+                  <Crown className="h-4 w-4" />{submitting ? "正在核验…" : "登录并核验身份"}
+                </Button>
+              </Toolbar>
+            </form>
+          </CardContent>
+        </Panel>
+      )}
+    </>
+  );
+}
+
+function MemberLoginGate({
+  loading,
+  onLogin,
+  onOpenExternalUrl,
+  visible,
+}: {
+  loading: boolean;
+  onLogin: (username: string, password: string) => Promise<boolean>;
+  onOpenExternalUrl: (url: string) => Promise<void>;
+  visible: boolean;
+}) {
+  const [rememberedCredentials] = useState(() => readRememberedMemberCredentials(window.localStorage.getItem(MEMBER_REMEMBERED_CREDENTIALS_KEY)));
+  const [username, setUsername] = useState(() => rememberedCredentials?.username ?? "");
+  const [password, setPassword] = useState(() => rememberedCredentials?.password ?? "");
+  const [rememberPassword, setRememberPassword] = useState(Boolean(rememberedCredentials));
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  if (!visible && !loading) return null;
+
+  const submit = async () => {
+    if (submitting || loading) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const loggedIn = await onLogin(username, password);
+      if (!loggedIn) {
+        setError("账号、密码或会员身份核验未通过，请重试。");
+        return;
+      }
+      if (rememberPassword) {
+        window.localStorage.setItem(MEMBER_REMEMBERED_CREDENTIALS_KEY, JSON.stringify({ username: username.trim(), password }));
+      } else {
+        window.localStorage.removeItem(MEMBER_REMEMBERED_CREDENTIALS_KEY);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="member-login-backdrop" role="dialog" aria-modal="true" aria-label="Codework 会员登录">
+      <div className="member-login-shell">
+        <section className="member-login-showcase" aria-label="Codework AI 官方入口">
+          <p className="eyebrow">CODEWORK AI 内部技术应用</p>
+          <h1>登录后进入会员活动中心</h1>
+          <p>使用 ♛Codework AI 官方账号完成身份验证，同步查看活动、会员身份和客户端更新。</p>
+            <div className="member-login-showcase-links">
+            <Button onClick={() => void onOpenExternalUrl(CODEWORK_REGISTER_URL)} type="button">
+              打开官方网站
+            </Button>
+            <Button onClick={() => void onOpenExternalUrl(CODEWORK_QQ_GROUP_URL)} type="button" variant="outline">
+              加入 QQ 群
+            </Button>
+            </div>
+          <div className="member-login-qr-grid">
+            <button type="button" onClick={() => void onOpenExternalUrl(CODEWORK_QQ_QR_URL)}>
+              <img src={CODEWORK_QQ_QR_URL} alt="Codework AI QQ 群二维码" />
+              <span>QQ 群二维码</span>
+            </button>
+            <button type="button" onClick={() => void onOpenExternalUrl(CODEWORK_WECHAT_QR_URL)}>
+              <img src={CODEWORK_WECHAT_QR_URL} alt="Codework AI 微信交流群二维码" />
+              <span>微信交流群二维码</span>
+            </button>
+          </div>
+          <small>没有官方账号？<button className="member-login-inline-link" type="button" onClick={() => void onOpenExternalUrl(CODEWORK_REGISTER_URL)}>立即注册</button></small>
+        </section>
+        <div className="member-login-card">
+          <div className="member-login-crown"><Crown aria-hidden="true" /></div>
+          <p className="eyebrow">{CODEWORK_PRODUCT_NAME}</p>
+          <h2>{loading ? "正在核验登录状态" : "官方账号验证"}</h2>
+          <p className="member-login-intro">
+            {loading ? "请稍候，正在安全读取已保存的登录令牌。" : "验证成功后进入客户端；勾选后才会在本机保留本次账号和密码。"}
+          </p>
+          {loading ? <div className="member-login-loading">正在加载…</div> : (
+            <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+              <Field label={CODEWORK_OFFICIAL_ACCOUNT_LABEL}>
+                <Input autoComplete="username" autoFocus onChange={(event) => setUsername(event.target.value)} placeholder="请输入 Codework AI 官方账号" value={username} />
+              </Field>
+              <Field label="官方账号密码">
+                <Input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} placeholder="请输入官方账号密码" type="password" value={password} />
+              </Field>
+              <div className="member-login-options">
+                <label><input checked={rememberPassword} onChange={(event) => setRememberPassword(event.target.checked)} type="checkbox" />记住密码</label>
+                <button type="button" onClick={() => void onOpenExternalUrl(CODEWORK_FORGOT_PASSWORD_URL)}>忘记密码？</button>
+              </div>
+              {error ? <p className="member-login-error">{error}</p> : null}
+              <Button className="member-login-submit" disabled={submitting || !username.trim() || !password} type="submit">
+                <Crown className="h-4 w-4" />{submitting ? "正在验证…" : "验证并进入客户端"}
+              </Button>
+              <p className="member-login-register">还没有账号？<button type="button" onClick={() => void onOpenExternalUrl(CODEWORK_REGISTER_URL)}>立即注册</button></p>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActivityCenterScreen({
+  activity,
+  onOpenPortal,
+  onRefresh,
+}: {
+  activity: MemberActivity | null;
+  onOpenPortal: () => Promise<void>;
+  onRefresh: () => Promise<MemberActivity | null>;
+}) {
+  const campaign = activity?.campaign ?? null;
+  return (
+    <>
+      <Panel className="activity-hero">
+        <CardContent>
+          <div className="activity-hero-layout">
+            <div className="activity-gift-wrap"><Gift aria-hidden="true" /></div>
+            <div>
+              <p className="eyebrow">CODEWORK ACTIVITY</p>
+              <h2>{campaign?.title ?? "活动中心"}</h2>
+              <p>{campaign ? "已同步到当前正在进行的活动，点击按钮会在浏览器打开已登录的活动官网。" : "活动内容由服务器统一更新，点击按钮会在浏览器打开已登录的活动官网。"}</p>
+            </div>
+            <Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />刷新公告</Button>
+            <Button onClick={() => void onOpenPortal()} variant="secondary"><ExternalLink className="h-4 w-4" />进入活动官网</Button>
+          </div>
+        </CardContent>
+      </Panel>
+      <Panel>
+        <CardHead title="当前活动" detail="客户端显示活动摘要；点击进入活动官网会自动带上登录态，不需要重复输入账号密码。" />
+        <CardContent>
+          <div className="activity-details">
+            <div><span>活动名称</span><strong>{campaign?.title ?? "活动官网实时内容"}</strong></div>
+            <div><span>公告状态</span><strong>{campaign ? "正在进行" : "以官网页面为准"}</strong></div>
+            <div><span>剩余次数</span><strong>{activity ? `${activity.remainingChances} 次` : "登录后同步"}</strong></div>
+            <div><span>结束时间</span><strong>{campaign ? formatTime(campaign.endsAt) : "以活动官网为准"}</strong></div>
+          </div>
+          <div className="activity-open-card">
+            <div>
+              <p className="eyebrow">SIGNED-IN HANDOFF</p>
+              <h3>在浏览器打开完整活动页</h3>
+              <p>客户端会先向服务器申请一次性登录票据，再打开活动官网。打开后就是你的当前账号状态，页面空间也比内嵌小框更舒服。</p>
+            </div>
+            <Button className="activity-open-button" onClick={() => void onOpenPortal()}>
+              <ExternalLink className="h-4 w-4" /> 进入已登录活动官网
+            </Button>
+          </div>
+        </CardContent>
+      </Panel>
+    </>
+  );
+}
+
+function CommunityScreen({
+  community,
+  profile,
+  draft,
+  onDraftChange,
+  onPublish,
+  onDelete,
+  onLike,
+  onReply,
+  onRefresh,
+}: {
+  community: CommunityResult | null;
+  profile: MemberProfile | null;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onPublish: () => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onLike: (id: string) => Promise<void>;
+  onReply: (id: string, content: string) => Promise<void>;
+  onRefresh: () => Promise<unknown>;
+}) {
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const canModerate = Boolean(community?.canModerate) && Boolean(profile?.actualAdmin);
+  const experienceRole: "administrator" | "founder" | "member" | "vip" = "administrator";
+  const onExperienceRoleChange = (_role: "administrator" | "founder" | "member" | "vip") => {};
+  const roles: Array<["administrator" | "founder" | "member" | "vip", string, string]> = [
+    ["administrator", "管理员", "完整管理视图"], ["founder", "创始人", "专属身份视图"],
+    ["member", "普通会员", "普通用户视图"], ["vip", "至尊 VIP", "VIP 身份视图"],
+  ];
+  return <>
+    <Panel className="activity-hero"><CardContent><div className="activity-hero-layout"><div className="activity-gift-wrap"><MessageCircle aria-hidden="true" /></div><div><p className="eyebrow">CODEWORK COMMUNITY</p><h2>超话</h2><p>登录用户可以分享想法、交流使用体验；评论会显示发布时间。</p></div><Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />刷新</Button></div></CardContent></Panel>
+    <Panel><CardHead title="发布超话" detail={profile ? `当前账号：${profile.username}` : "请先登录官方账号"} /><CardContent><Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={500} placeholder="说点什么，最多 500 字…" /><div className="release-actions"><Button disabled={!profile || !draft.trim()} onClick={() => void onPublish()}><MessageCircle className="h-4 w-4" />发布</Button></div></CardContent></Panel>
+    <Panel><CardHead title="最新超话" detail="昵称已脱敏，支持点赞和回复。" /><CardContent><div className="community-comment-list">{community?.comments?.length ? community.comments.map((comment) => { const canDelete = canModerate || comment.authorUserId === profile?.userId; const reply = replyDrafts[comment.id] ?? ""; return <article className="community-comment" key={comment.id}><div><strong>{comment.authorUsername}</strong><time>{formatTime(comment.createdAt)}</time></div><p>{comment.content}</p><div className="release-actions"><Button onClick={() => void onLike(comment.id)} size="sm" variant="outline">👍 {comment.likeCount}</Button>{canDelete ? <Button onClick={() => void onDelete(comment.id)} size="sm" variant="outline"><Trash2 className="h-4 w-4" />删除</Button> : null}</div>{comment.replies.length ? <div className="community-replies">{comment.replies.map((reply) => <p key={reply.id}><strong>{reply.authorUsername}</strong>：{reply.content}</p>)}</div> : null}<div className="community-reply-box"><Input value={reply} maxLength={500} placeholder="回复这条超话" onChange={(event) => setReplyDrafts({ ...replyDrafts, [comment.id]: event.target.value })} /><Button disabled={!reply.trim()} onClick={() => { void onReply(comment.id, reply); setReplyDrafts({ ...replyDrafts, [comment.id]: "" }); }} size="sm">回复</Button></div></article>; }) : <div className="empty">暂无超话，发布第一条吧。</div>}</div></CardContent></Panel>
+  </>;
+}
+
+function AnnouncementCenterScreen({ feed, onRead, onRefresh }: { feed: AnnouncementFeed | null; onRead: (announcement: ClientAnnouncement) => void; onRefresh: () => Promise<unknown> }) {
+  return <>
+    <Panel className="activity-hero"><CardContent><div className="activity-hero-layout"><div className="activity-gift-wrap"><Bell aria-hidden="true" /></div><div><p className="eyebrow">CODEWORK NOTICE</p><h2>公告中心</h2><p>平台通知会自动同步到客户端，不需要重新安装。</p></div><Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />刷新</Button></div></CardContent></Panel>
+    <Panel><CardHead title="最新公告" detail="已读状态只保存在当前电脑，不影响其他设备。" /><CardContent><div className="announcement-list">{feed?.announcements.length ? feed.announcements.map((announcement) => <article className={`announcement-card ${announcement.priority}`} key={`${announcement.id}:${announcement.revision}`} onClick={() => onRead(announcement)}><div><strong>{announcement.title}</strong><time>{announcement.publishedAt ? formatTime(new Date(announcement.publishedAt).getTime()) : "草稿"}</time></div><p>{announcement.body}</p><small>{announcement.isPinned ? "置顶公告" : "平台公告"} · 第 {announcement.revision} 版</small></article>) : <div className="empty">暂无公告</div>}</div></CardContent></Panel>
+  </>;
+}
+
+function AnnouncementManagementScreen({ draft, editingId, feed, onDraftChange, onEdit, onPublish, onWithdraw }: { draft: { title: string; body: string; priority: "normal" | "important" | "urgent"; isPinned: boolean }; editingId: string | null; feed: AnnouncementFeed; onDraftChange: (draft: { title: string; body: string; priority: "normal" | "important" | "urgent"; isPinned: boolean }) => void; onEdit: (announcement: ClientAnnouncement) => void; onPublish: () => Promise<void>; onWithdraw: (id: string) => Promise<void> }) {
+  return <>
+    <Panel className="activity-hero"><CardContent><div className="activity-hero-layout"><div className="activity-gift-wrap"><Edit3 aria-hidden="true" /></div><div><p className="eyebrow">ADMIN ONLY</p><h2>公告管理</h2><p>发布后，所有客户端启动或定时刷新时都会自动同步。</p></div><UiBadge>{feed.announcements.length} 条已发布</UiBadge></div></CardContent></Panel>
+    <Panel><CardHead title={editingId ? "编辑公告" : "发布公告"} detail="普通公告为细横幅；重要和紧急公告会使用更醒目的颜色。" /><CardContent><div className="announcement-editor"><Field label="标题"><Input maxLength={80} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} value={draft.title} /></Field><Field label="内容"><Textarea maxLength={2000} onChange={(event) => onDraftChange({ ...draft, body: event.target.value })} value={draft.body} /></Field><label>公告等级<select onChange={(event) => onDraftChange({ ...draft, priority: event.target.value as typeof draft.priority })} value={draft.priority}><option value="normal">普通</option><option value="important">重要</option><option value="urgent">紧急</option></select></label><label><input checked={draft.isPinned} onChange={(event) => onDraftChange({ ...draft, isPinned: event.target.checked })} type="checkbox" />置顶显示</label><div className="release-actions"><Button disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => void onPublish()}><Bell className="h-4 w-4" />{editingId ? "保存修改" : "立即发布"}</Button></div></div></CardContent></Panel>
+    <Panel><CardHead title="已发布公告" detail="可再次编辑、调整置顶或撤回。" /><CardContent><div className="announcement-list">{feed.announcements.map((announcement) => <article className={`announcement-card ${announcement.priority}`} key={announcement.id}><div><strong>{announcement.title}</strong><time>第 {announcement.revision} 版</time></div><p>{announcement.body}</p><div className="release-actions"><Button onClick={() => onEdit(announcement)} size="sm" variant="outline"><Edit3 className="h-4 w-4" />编辑</Button><Button onClick={() => void onWithdraw(announcement.id)} size="sm" variant="outline"><Trash2 className="h-4 w-4" />撤回</Button></div></article>)}</div></CardContent></Panel>
+  </>;
+}
+
+function formatInstallStage(stage?: string) {
+  if (stage === "checking") return "正在检测";
+  if (stage === "downloading") return "正在下载";
+  if (stage === "downloaded") return "下载完成，正在校验更新包";
+  if (stage === "installing") return "正在覆盖安装，完成后自动重启";
+  if (stage === "closing") return "正在关闭旧客户端，安装完成后自动启动新版";
+  if (stage === "relaunching") return "正在启动新版客户端";
+  if (stage === "creatingShortcut") return "正在创建桌面快捷方式";
+  if (stage === "completed") return "已完成";
+  return "等待操作";
+}
+
+function ReleaseNotesScreen({
+  release,
+  progress,
+  onCheck,
+  onInstall,
+}: {
+  release: CodeworkReleaseResult | null;
+  progress: InstallerProgress | null;
+  onCheck: () => Promise<unknown>;
+  onInstall: () => Promise<void>;
+}) {
+  const available = isSuccessStatus(release?.status) && Boolean(release?.available);
+  const percentage = progress?.percent;
+  const updateSteps = getCodeworkUpdateSteps(progress?.stage);
+  const currentUpdateStep = progress ? Math.max(0, updateSteps.indexOf(progress.stage as typeof updateSteps[number])) : -1;
+  return (
+    <>
+      <Panel className="release-hero">
+        <CardContent>
+          <div className="release-hero-layout">
+            <div className="release-mark"><Download aria-hidden="true" /></div>
+            <div>
+              <p className="eyebrow">CODEWORK AI CLIENT</p>
+              <h2>当前版本 {release?.currentVersion ?? "读取中"}</h2>
+              <p>{available ? `发现新版本 ${release?.latestVersion}，点击后将自动下载、覆盖安装并重启新版。` : "启动时会自动检测新版本；暂不更新不影响继续使用。"}</p>
+            </div>
+            <span className="release-current-chip">{available ? "发现新版本" : "已是最新版本"}</span>
+          </div>
+        </CardContent>
+      </Panel>
+      <Panel>
+        <CardHead title={available ? `新版本 ${release?.latestVersion}` : "版本更新"} detail="一键更新会保留本机供应商和客户端配置，安装结束后自动启动新版。" />
+        <CardContent>
+          {release?.notes?.length ? <ul className="release-note-list">{release.notes.map((note) => <li key={note}>{note}</li>)}</ul> : <p className="muted-copy">点击“重新检测”即可读取最新版本与更新说明。</p>}
+          <div className="release-actions">
+            <Button onClick={() => void onCheck()} variant="outline"><RefreshCw className="h-4 w-4" />重新检测</Button>
+            {available ? <Button onClick={() => void onInstall()}><Download className="h-4 w-4" />立即更新</Button> : null}
+          </div>
+          {progress ? <div className="release-progress"><strong>{formatInstallStage(progress.stage)}</strong><span>{percentage !== undefined ? `${percentage}% · ` : ""}{formatBytes(progress.downloadedBytes ?? 0)}{progress.totalBytes ? ` / ${formatBytes(progress.totalBytes)}` : ""}</span><div><i style={{ width: `${percentage ?? 12}%` }} /></div></div> : null}
+          {progress ? <ol className="release-step-list">{updateSteps.map((stage, index) => <li className={index <= currentUpdateStep ? "active" : ""} key={stage}>{formatInstallStage(stage)}</li>)}</ol> : null}
+        </CardContent>
+      </Panel>
+    </>
+  );
+}
+
+function OfficialChatGptScreen({
+  result,
+  progress,
+  onRefresh,
+  onInstall,
+}: {
+  result: ChatGptInstallResult | null;
+  progress: InstallerProgress | null;
+  onRefresh: () => Promise<unknown>;
+  onInstall: () => Promise<void>;
+}) {
+  const installed = isSuccessStatus(result?.status) && Boolean(result?.installed);
+  const canInstall = result?.wingetAvailable !== false;
+  const steps = [
+    ["checking", "检测官方来源"],
+    ["installing", "Microsoft Store 安装"],
+    ["creatingShortcut", "创建桌面快捷方式"],
+    ["completed", "完成"],
+  ] as const;
+  const activeIndex = Math.max(0, steps.findIndex(([stage]) => stage === progress?.stage));
+  const progressWidth = progress ? `${Math.max(18, ((activeIndex + 1) / steps.length) * 100)}%` : "0%";
+  return (
+    <>
+      <Panel className="release-hero">
+        <CardContent><div className="release-hero-layout"><div className="release-mark"><Download aria-hidden="true" /></div><div><p className="eyebrow">MICROSOFT STORE</p><h2>下载官方 ChatGPT</h2><p>仅通过 Microsoft Store 安装 OpenAI 官方 ChatGPT，不下载或分发第三方安装包。</p></div><span className="release-current-chip">{installed ? "已安装" : "官方来源"}</span></div></CardContent>
+      </Panel>
+      <Panel>
+        <CardHead title={installed ? "官方 ChatGPT 已可使用" : "准备安装"} detail={installed ? (result?.shortcutCreated ? "桌面快捷方式已创建。" : "可重新执行以创建桌面快捷方式。") : "开始前，客户端会确认 Microsoft Store 的发布者为 OpenAI。"} />
+        <CardContent>
+          {!result?.wingetAvailable ? <p className="muted-copy">未检测到 Microsoft Store 安装组件（winget）。请先更新 Microsoft Store 或 App Installer。</p> : null}
+          <div className="release-actions"><Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />检测状态</Button><Button disabled={!canInstall} onClick={() => void onInstall()}><Download className="h-4 w-4" />{installed ? "创建桌面快捷方式" : "通过 Microsoft Store 安装"}</Button></div>
+          {progress ? <div className="release-progress chatgpt-install-progress"><strong>{steps[activeIndex]?.[1] ?? "准备安装"}</strong><span>正在使用 Microsoft Store 官方渠道安装；如系统弹出确认，请按提示继续。</span><div><i style={{ width: progressWidth }} /></div><ol>{steps.map(([stage, label], index) => <li className={index <= activeIndex ? "active" : ""} key={stage}>{label}</li>)}</ol></div> : null}
+        </CardContent>
+      </Panel>
+    </>
+  );
+}
 
 function OverviewScreen({
   overview,
@@ -2916,58 +3848,40 @@ function ZedRemoteProjectSection({
   );
 }
 
-function UserScriptsScreen({ settings, market, actions }: { settings: SettingsResult | null; market: ScriptMarketResult | null; actions: Actions }) {
-  const inventory = settings?.user_scripts;
-  const scripts = inventory?.scripts ?? [];
-  const marketScripts = market?.market.scripts ?? [];
-  const installedCount = marketScripts.filter((script) => script.installed).length;
+function UserScriptsScreen({ market, actions }: { market: SkillMarketResult | null; actions: Actions }) {
+  const skills = market?.market.skills ?? [];
+  const installedCount = skills.filter((skill) => skill.installed).length;
   return (
     <>
       <Panel>
-        <CardHead title={t("脚本市场")} detail={tf("{0} 个市场脚本，已安装 {1} 个，本地整体 {2}", [marketScripts.length, installedCount, inventory?.enabled === false ? t("关闭") : t("开启")])} />
+        <CardHead title="Skill 市场" detail={tf("{0} 个官方 Skill，已安装 {1} 个", [skills.length, installedCount])} />
         <CardContent>
           <div className="metric-list">
             <Metric label={t("市场状态")} value={market?.market.message ?? t("尚未刷新")} />
-            <Metric label={t("远程脚本")} value={tf("{0} 个", [marketScripts.length])} />
+            <Metric label="官方 Skill" value={tf("{0} 个", [skills.length])} />
             <Metric label={t("已安装")} value={tf("{0} 个", [installedCount])} />
-            <Metric label={t("本地整体")} value={inventory?.enabled === false ? t("关闭") : t("开启")} />
+            <Metric label="安装位置" value="~/.codex/skills" />
           </div>
           <Toolbar>
-            <Button onClick={() => void actions.refreshScriptMarket()}>
+            <Button onClick={() => void actions.refreshSkillMarket()}>
               <RefreshCw className="h-4 w-4" />
-              {t("刷新市场")}
-            </Button>
-            <Button onClick={() => void actions.openExternalUrl(SCRIPT_MARKET_REPOSITORY_URL)} variant="secondary">
-              <ExternalLink className="h-4 w-4" />
-              {t("投稿")}
-            </Button>
-            <Button onClick={() => void actions.refreshCurrent()} variant="secondary">
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新本地")}
+              刷新 Skill 市场
             </Button>
           </Toolbar>
         </CardContent>
       </Panel>
       <Panel>
-        <CardHead title={t("市场脚本")} detail={market?.market.updatedAt ? tf("清单更新时间：{0}", [market.market.updatedAt]) : t("从 GitHub 静态清单加载")} />
+        <CardHead title="官方 Skill" detail={market?.market.updatedAt ? tf("清单更新时间：{0}", [market.market.updatedAt]) : "从官方服务加载"} />
         <CardContent>
-          {marketScripts.length ? (
+          {skills.length ? (
             <div className="script-market-grid">
-              {marketScripts.map((script) => (
-                <MarketScriptCard key={script.id} script={script} actions={actions} />
+              {skills.map((skill) => (
+                <SkillMarketCard key={skill.id} skill={skill} actions={actions} />
               ))}
             </div>
           ) : (
-            <div className="empty">{market?.status === "failed" ? market.message : t("点击刷新市场加载远程脚本。")}</div>
+            <div className="empty">{market?.status === "failed" ? market.message : "点击刷新 Skill 市场加载官方技能。"}</div>
           )}
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("本地脚本")} detail={t("内置、手动和市场安装脚本；可在这里启停或删除用户脚本")} />
-        <CardContent>
-          <div className="table">
-            {scripts.length ? scripts.map((script) => <ScriptRow key={script.key} script={script} actions={actions} />) : <div className="empty">{t("未发现用户脚本。")}</div>}
-          </div>
         </CardContent>
       </Panel>
     </>
@@ -3313,17 +4227,17 @@ function AboutScreen({
   return (
     <>
       <Panel>
-        <CardHead title={t("关于 Codework Codex++")} detail={t("本地 Codex 增强、管理工具和安装包维护")} />
+        <CardHead title={t("关于 ♛Codework AI客户端")} detail={t("本地 Codex 增强、管理工具和安装包维护")} />
         <CardContent>
           <div className="metric-list">
-            <Metric label={t("Codework Codex++ 版本")} value={overview?.current_version ?? "-"} />
+            <Metric label={t("♛Codework AI客户端版本")} value={overview?.current_version ?? "-"} />
             <Metric label={t("Codex 版本")} value={overview?.codex_version ?? t("未检测到")} />
-            <Metric label={t("上游源码（MIT）")} value="github.com/BigPizzaV3/CodexPlusPlus" />
+            <Metric label="客户端下载地址" value={CODEWORK_CLIENT_DOWNLOAD_URL} />
           </div>
           <Toolbar>
-            <Button onClick={() => void actions.openExternalUrl(UPSTREAM_SOURCE_URL)} variant="secondary">
+            <Button onClick={() => void actions.openExternalUrl(CODEWORK_CLIENT_DOWNLOAD_URL)} variant="secondary">
               <ExternalLink className="h-4 w-4" />
-              {t("打开项目主页")}
+              打开客户端下载页
             </Button>
           </Toolbar>
         </CardContent>
@@ -3912,36 +4826,54 @@ function SortableRelayProfileCard({
   );
 }
 
-function MarketScriptCard({ script, actions }: { script: ScriptMarketItem; actions: Actions }) {
-  const status = script.updateAvailable ? t("可更新") : script.installed ? tf("已安装 {0}", [script.installedVersion]) : t("未安装");
+function SkillMarketCard({ skill, actions }: { skill: SkillMarketItem; actions: Actions }) {
+  const [showUsage, setShowUsage] = useState(false);
+  const status = skill.updateAvailable ? "可更新" : skill.installed ? tf("已安装 {0}", [skill.installedVersion]) : "未安装";
+  const usageRows = skillUsageGuideRows(skill.usage);
   return (
     <div className="script-market-card">
       <div className="script-market-title">
         <div>
-          <strong>{script.name}</strong>
-          <span>{script.author || t("未知作者")}</span>
+          <strong>{skill.name}</strong>
+          <span>{skill.author || "Codework AI 官方"}</span>
         </div>
-        <UiBadge variant={script.updateAvailable ? "default" : script.installed ? "secondary" : "outline"}>{status}</UiBadge>
+        <UiBadge variant={skill.updateAvailable ? "default" : skill.installed ? "secondary" : "outline"}>{status}</UiBadge>
       </div>
-      <p className="script-market-description">{script.description || t("暂无描述。")}</p>
+      <p className="script-market-description">{skill.description || "暂无功能说明"}</p>
       <div className="script-market-tags">
-        <span className="script-market-tag">v{script.version}</span>
-        {script.tags.map((tag) => (
+        <span className="script-market-tag">v{skill.version}</span>
+        {skill.tags.map((tag) => (
           <span className="script-market-tag" key={tag}>{tag}</span>
         ))}
       </div>
       <div className="script-market-actions">
-        <Button onClick={() => void actions.installMarketScript(script.id)} size="sm">
+        <Button onClick={() => void actions.installMarketSkill(skill.id)} size="sm" disabled={skill.installed && !skill.updateAvailable}>
           <Download className="h-4 w-4" />
-          {script.updateAvailable ? t("更新") : script.installed ? t("重新安装") : t("安装")}
+          {skillActionLabel(skill)}
         </Button>
-        {script.homepage ? (
-          <Button onClick={() => void actions.openExternalUrl(script.homepage)} size="sm" variant="secondary">
+        {usageRows.length ? (
+          <Button onClick={() => setShowUsage((current) => !current)} size="sm" variant="secondary">
+            <Info className="h-4 w-4" />
+            {showUsage ? "收起说明" : "使用说明"}
+          </Button>
+        ) : null}
+        {skill.homepage ? (
+          <Button onClick={() => void actions.openExternalUrl(skill.homepage)} size="sm" variant="secondary">
             <ExternalLink className="h-4 w-4" />
             {t("主页")}
           </Button>
         ) : null}
       </div>
+      {showUsage && usageRows.length ? (
+        <div className="skill-usage-guide">
+          {usageRows.map(([label, value]) => (
+            <div key={label}>
+              <strong>{label}</strong>
+              <span>{value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -5317,7 +6249,14 @@ function routeTitle(route: Route) {
 
 function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
+    announcements: "查看平台自动同步的最新公告与历史通知。",
+    announcementManagement: "管理员可发布、置顶和维护客户端公告。",
     overview: t("检查问题、启动与快速修复"),
+    account: "登录 ♛Codework AI 官方账号，核验普通 VIP 或至尊 VIP 身份",
+    activity: "查看抽奖系统同步的会员活动与参与次数",
+    community: "发布和查看 Codework 超话，管理员可维护全部评论",
+    updates: "查看客户端版本、更新内容与覆盖安装说明",
+    downloadChatGpt: "通过 Microsoft Store 安装 OpenAI 官方 ChatGPT，并创建桌面快捷方式。",
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
     sessions: t("查看、删除和修复 Codex 本地会话"),
     context: t("独立管理 MCP、Skills、Plugins"),
@@ -7046,3 +7985,4 @@ function loadInitialRoute(): Route {
   }
   return "overview";
 }
+// 頨思遢雿?
