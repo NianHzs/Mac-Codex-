@@ -12,6 +12,7 @@ mod computer_use_guard;
 pub mod diagnostic_log;
 pub mod env_conflicts;
 pub mod http_client;
+pub mod identity_icon;
 pub mod install;
 pub mod launcher;
 pub mod model_catalog;
@@ -29,6 +30,7 @@ pub mod relay_rotation;
 pub mod relay_switch;
 pub mod routes;
 pub mod script_market;
+pub mod skill_market;
 pub mod settings;
 pub mod status;
 pub mod stepwise;
@@ -61,6 +63,24 @@ pub fn windows_apply_codexplusplus_icon_to_process_window(
     icon_resource_path: std::path::PathBuf,
 ) -> bool {
     windows_integration::apply_codexplusplus_icon_to_process_window(process_id, icon_resource_path)
+}
+
+#[cfg(windows)]
+pub fn windows_apply_codexplusplus_icon_to_process_tree(
+    process_id: u32,
+    icon_resource_path: std::path::PathBuf,
+) -> bool {
+    windows_integration::apply_codexplusplus_icon_to_process_tree(process_id, icon_resource_path)
+}
+
+#[cfg(windows)]
+pub fn windows_descendant_process_ids(root_process_id: u32, process_tree: &[(u32, u32)]) -> Vec<u32> {
+    windows_integration::descendant_process_ids(root_process_id, process_tree)
+}
+
+#[cfg(windows)]
+pub fn windows_identity_icon_class_slots() -> [i32; 2] {
+    windows_integration::identity_icon_class_slots()
 }
 
 #[cfg(windows)]
