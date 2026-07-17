@@ -301,6 +301,8 @@ pub struct BackendSettings {
     pub codex_app_visual_theme_id: String,
     #[serde(rename = "codexAppVisualThemeServiceUrl", default)]
     pub codex_app_visual_theme_service_url: String,
+    #[serde(rename = "codexAppVisualThemeMemberToken", default)]
+    pub codex_app_visual_theme_member_token: String,
     #[serde(rename = "codexGoalsEnabled", default)]
     pub codex_goals_enabled: bool,
     #[serde(rename = "launchMode", default)]
@@ -374,6 +376,7 @@ impl Default for BackendSettings {
             codex_app_visual_theme_enabled: false,
             codex_app_visual_theme_id: "cyber-neon".to_string(),
             codex_app_visual_theme_service_url: String::new(),
+            codex_app_visual_theme_member_token: String::new(),
             codex_goals_enabled: false,
             launch_mode: LaunchMode::Patch,
             relay_base_url: default_relay_base_url(),
@@ -921,6 +924,18 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
             "codexAppVisualThemeServiceUrl".to_string(),
             Value::String(value.trim().trim_end_matches('/').to_string()),
         );
+    }
+    if let Some(value) = source
+        .get("codexAppVisualThemeMemberToken")
+        .and_then(Value::as_str)
+    {
+        let token = value.trim();
+        if token.is_empty() || (token.len() >= 16 && token.len() <= 4096) {
+            target.insert(
+                "codexAppVisualThemeMemberToken".to_string(),
+                Value::String(token.to_string()),
+            );
+        }
     }
     if let Some(value) = source.get("codexGoalsEnabled").and_then(Value::as_bool) {
         target.insert("codexGoalsEnabled".to_string(), Value::Bool(value));
@@ -1907,6 +1922,27 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(
             store.load().unwrap().codex_app_visual_theme_service_url,
             "https://themes.example.test/v1"
+        );
+    }
+
+    #[test]
+    fn settings_store_persists_visual_theme_member_session_token() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+
+        let updated = store
+            .update(json!({
+                "codexAppVisualThemeMemberToken": "member-theme-token-1234"
+            }))
+            .unwrap();
+
+        assert_eq!(
+            updated.codex_app_visual_theme_member_token,
+            "member-theme-token-1234"
+        );
+        assert_eq!(
+            store.load().unwrap().codex_app_visual_theme_member_token,
+            "member-theme-token-1234"
         );
     }
 
