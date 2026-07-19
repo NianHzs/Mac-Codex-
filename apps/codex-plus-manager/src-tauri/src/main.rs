@@ -1,7 +1,29 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
-    for arg in std::env::args() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut update_confirmation_path = None;
+    let mut index = 1;
+    while index < args.len() {
+        if args[index] == "--confirm-update" {
+            if let Some(value) = args.get(index + 1) {
+                let path = std::path::PathBuf::from(value);
+                if path.is_absolute() {
+                    update_confirmation_path = Some(path);
+                } else {
+                    let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                        "manager.update_confirmation.invalid_path",
+                        serde_json::json!({ "path": value }),
+                    );
+                }
+                index += 2;
+                continue;
+            }
+        }
+        index += 1;
+    }
+
+    for arg in &args {
         if arg.starts_with("codeworkcodexplusplus://") {
             match codex_plus_core::provider_import::save_pending_provider_import_from_url(&arg) {
                 Ok(request) => {
@@ -25,7 +47,7 @@ fn main() {
             }
         }
     }
-    codex_plus_manager_lib::run();
+    codex_plus_manager_lib::run(update_confirmation_path);
 }
 
 #[cfg(windows)]

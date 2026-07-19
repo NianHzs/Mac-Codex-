@@ -157,6 +157,11 @@ pub async fn install_codework_release(
         payload.last_failure = Some(error.to_string());
         return failed(&format!("无法记录待完成更新：{error}"), payload);
     }
+    if let Err(error) = prepare_update_handoff() {
+        let _ = clear_pending_codework_update();
+        payload.last_failure = Some(error.to_string());
+        return failed(&format!("无法准备更新启动确认：{error}"), payload);
+    }
     payload.pending_target_version = Some(manifest.version.clone());
     payload.rollback_available = true;
 
@@ -197,6 +202,24 @@ fn pending_update_completed(target_version: &str, started_version: &str) -> bool
 
 fn pending_codework_update_path() -> PathBuf {
     codex_plus_core::paths::default_pending_client_update_path()
+}
+
+fn prepare_update_handoff() -> anyhow::Result<()> {
+    prepare_update_handoff_at(
+        &codex_plus_core::paths::default_update_confirmation_path(),
+        &codex_plus_core::paths::default_update_rollback_path(),
+    )
+}
+
+fn prepare_update_handoff_at(confirmation_path: &Path, rollback_path: &Path) -> anyhow::Result<()> {
+    for path in [confirmation_path, rollback_path] {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn save_pending_codework_update(
@@ -553,6 +576,20 @@ mod tests {
     #[test]
     fn embedded_release_public_key_is_a_valid_ed25519_key() {
         assert!(embedded_release_public_key().is_ok());
+    }
+
+    #[test]
+    fn update_handoff_removes_stale_confirmation_and_rollback_markers() {
+        let temp = tempfile::tempdir().unwrap();
+        let confirmation = temp.path().join("update-start-confirmed.json");
+        let rollback = temp.path().join("update-rollback.json");
+        std::fs::write(&confirmation, "old confirmation").unwrap();
+        std::fs::write(&rollback, "old rollback").unwrap();
+
+        super::prepare_update_handoff_at(&confirmation, &rollback).unwrap();
+
+        assert!(!confirmation.exists());
+        assert!(!rollback.exists());
     }
 
     #[test]

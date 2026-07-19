@@ -2,19 +2,22 @@ pub mod commands;
 pub mod install;
 pub mod release_update;
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, WindowEvent};
 
 const TRAY_ID: &str = "codex_plus_tray";
+const TRAY_TOOLTIP: &str = "\u{265B}Codework AI\u{5BA2}\u{6237}\u{7AEF}";
 
 static APP_EXITING: AtomicBool = AtomicBool::new(false);
 const TRAY_MENU_SHOW: &str = "tray_show_main";
 const TRAY_MENU_QUIT: &str = "tray_quit_app";
 
-pub fn run() {
+pub fn run(update_confirmation_path: Option<PathBuf>) {
     install_panic_logger();
     let _ = release_update::reconcile_pending_codework_update();
     let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
@@ -35,7 +38,7 @@ pub fn run() {
                     "main",
                     tauri::WebviewUrl::App("/index.html".into()),
                 )
-                    .title("Codework Codex++ 管理工具")
+                    .title("♛Codework AI客户端")
                     .inner_size(1180.0, 820.0)
                     .min_inner_size(960.0, 720.0);
             if let Some(icon) = app.default_window_icon().cloned() {
@@ -44,17 +47,57 @@ pub fn run() {
             let main_window = main_window_builder.build()?;
             install_tray(app)?;
             register_main_window_events(main_window);
+            if let Some(path) = update_confirmation_path.as_deref() {
+                write_update_confirmation_marker(path)?;
+                let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                    "manager.update_confirmation.written",
+                    serde_json::json!({
+                        "path": path,
+                        "version": codex_plus_core::version::DISPLAY_VERSION
+                    }),
+                );
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::client_login,
+            commands::client_profile,
+            commands::sync_visual_theme_member_session,
+            commands::load_visual_theme_manifest,
+            commands::load_visual_theme_asset,
+            commands::update_client_active_role,
+            commands::sync_client_identity_window_icon,
+            commands::client_activity,
+            commands::community_comments,
+            commands::post_community_comment,
+            commands::delete_community_comment,
+            commands::toggle_community_comment_like,
+            commands::reply_to_community_comment,
+            commands::list_private_friends,
+            commands::update_private_presence,
+            commands::respond_to_friend_request,
+            commands::send_friend_request,
+            commands::cancel_friend_request,
+            commands::search_registered_friend,
+            commands::load_private_messages,
+            commands::send_private_message,
+            commands::send_private_attachment,
+            commands::client_announcements,
+            commands::manage_client_announcements,
+            commands::save_client_announcement,
+            commands::withdraw_client_announcement,
+            commands::client_portal_link,
             commands::backend_version,
             release_update::check_codework_release,
             release_update::install_codework_release,
+            commands::get_chatgpt_install_status,
+            commands::install_official_chatgpt,
             commands::load_overview,
             commands::launch_codex_plus,
             commands::restart_codex_plus,
             commands::load_settings,
             commands::save_settings,
+            commands::save_visual_theme_settings,
             commands::load_ccs_providers,
             commands::import_ccs_providers,
             commands::load_pending_provider_import,
@@ -70,6 +113,8 @@ pub fn run() {
             commands::load_ads,
             commands::refresh_script_market,
             commands::install_market_script,
+            commands::refresh_skill_market,
+            commands::install_market_skill,
             commands::set_user_script_enabled,
             commands::delete_user_script,
             commands::open_external_url,
@@ -131,6 +176,7 @@ fn install_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
     let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip(TRAY_TOOLTIP)
         .menu(&tray_menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -195,8 +241,30 @@ fn manager_exit_app<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 }
 
 pub(crate) fn exit_manager_for_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    APP_EXITING.store(true, Ordering::SeqCst);
+    mark_manager_exiting_for_update();
     app.exit(0);
+}
+
+fn mark_manager_exiting_for_update() {
+    APP_EXITING.store(true, Ordering::SeqCst);
+}
+
+fn write_update_confirmation_marker(path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary_path = path.with_extension("json.tmp");
+    let confirmed_at_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+    let contents = serde_json::to_string_pretty(&serde_json::json!({
+        "version": codex_plus_core::version::DISPLAY_VERSION,
+        "confirmedAtMs": confirmed_at_ms
+    }))?;
+    std::fs::write(&temporary_path, format!("{contents}\n"))?;
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    std::fs::rename(&temporary_path, path)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -230,6 +298,36 @@ fn show_main_window<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_exit_marks_the_manager_as_exiting() {
+        APP_EXITING.store(false, Ordering::SeqCst);
+        mark_manager_exiting_for_update();
+        assert!(APP_EXITING.load(Ordering::SeqCst));
+        APP_EXITING.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn update_confirmation_marker_records_the_started_version_atomically() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("update-start-confirmed.json");
+
+        write_update_confirmation_marker(&marker).unwrap();
+
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+        assert_eq!(
+            value["version"],
+            serde_json::json!(codex_plus_core::version::DISPLAY_VERSION)
+        );
+        assert!(value["confirmedAtMs"].as_u64().is_some());
+        assert!(!marker.with_extension("json.tmp").exists());
     }
 }
 

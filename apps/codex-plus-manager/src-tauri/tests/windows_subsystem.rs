@@ -90,7 +90,7 @@ fn codework_windows_identity_is_isolated_from_upstream() {
     assert!(manager_cargo.contains("name = \"codework-codex-plus-plus-manager\""));
     assert!(launcher_cargo.contains("name = \"codework-codex-plus-plus\""));
     assert!(tauri_config.contains("com.codework.codexplusplus.manager"));
-    assert!(tauri_config.contains("Codework Codex++ Manager"));
+    assert!(tauri_config.contains("♛Codework AI客户端"));
     assert!(manager_main.contains("codeworkcodexplusplus://"));
     assert!(manager_main.contains("codework-codex-plus-plus-manager.exe"));
     assert!(windows_rs.contains("Uninstall\\CodeworkCodexPlusPlus"));
@@ -159,7 +159,7 @@ fn launcher_binary_embeds_codex_icon_resource() {
 }
 
 #[test]
-fn windows_binaries_request_administrator_privileges() {
+fn windows_binaries_can_restart_after_a_silent_user_level_update() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let manager_build =
         std::fs::read_to_string(manifest_dir.join("build.rs")).expect("read manager build.rs");
@@ -182,7 +182,8 @@ fn windows_binaries_request_administrator_privileges() {
 
     assert!(manager_build.contains("windows-app-manifest.xml"));
     assert!(launcher_build.contains("windows-app-manifest.xml"));
-    assert!(windows_manifest.contains("requireAdministrator"));
+    assert!(windows_manifest.contains("level=\"asInvoker\""));
+    assert!(!windows_manifest.contains("requireAdministrator"));
     assert!(windows_manifest.contains("Microsoft.Windows.Common-Controls"));
     assert!(windows_installer.contains("RequestExecutionLevel admin"));
 }
@@ -449,6 +450,124 @@ fn codework_build_does_not_call_or_register_upstream_updater() {
 }
 
 #[test]
+fn codework_release_uses_dedicated_commands_and_keeps_the_upstream_updater_disabled() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+    let release_update = std::fs::read_to_string(manifest_dir.join("src/release_update.rs"))
+        .expect("read release update service");
+    let lib = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))
+        .expect("read manager lib");
+
+    assert!(release_update.contains("pub async fn check_codework_release"));
+    assert!(release_update.contains("pub async fn install_codework_release"));
+    assert!(release_update.contains("codework-release-progress"));
+    assert!(lib.contains("release_update::check_codework_release"));
+    assert!(lib.contains("release_update::install_codework_release"));
+    assert!(!commands.contains("pub async fn check_update"));
+    assert!(!commands.contains("pub async fn perform_update"));
+}
+
+#[test]
+fn manager_installs_only_allowlisted_official_chatgpt_store_products() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+    let lib = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))
+        .expect("read manager lib");
+
+    assert!(commands.contains("9PLM9XGG6VKS"));
+    assert!(commands.contains("9NT1R1C2HH7J"));
+    assert!(commands.contains("--source"));
+    assert!(commands.contains("msstore"));
+    assert!(commands.contains("chatgpt-install-progress"));
+    assert!(commands.contains("pub async fn get_chatgpt_install_status"));
+    assert!(commands.contains("pub async fn install_official_chatgpt"));
+    assert!(lib.contains("commands::get_chatgpt_install_status"));
+    assert!(lib.contains("commands::install_official_chatgpt"));
+}
+
+#[test]
+fn manager_ui_exposes_release_install_and_official_chatgpt_download_routes() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/App.tsx"))
+        .expect("read manager App.tsx");
+
+    assert!(app.contains("downloadChatGpt"));
+    assert!(app.contains("check_codework_release"));
+    assert!(app.contains("install_codework_release"));
+    assert!(app.contains("chatgpt-install-progress"));
+    assert!(app.contains("发现新版本"));
+}
+
+#[test]
+fn codework_brand_uses_the_identity_aware_crown_and_keeps_the_packaged_crown_asset() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/App.tsx"))
+        .expect("read manager App.tsx");
+    let crown = manifest_dir.join("icons/codework-crown.svg");
+
+    assert!(crown.exists());
+    assert!(app.contains("<Crown"));
+    assert!(app.contains("brand-crown"));
+    assert!(!app.contains("brand-mark\">C++"));
+}
+
+#[test]
+fn private_chat_centers_its_active_name_and_uses_an_admin_crest() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let chat = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/private-chat.tsx"))
+        .expect("read private chat component");
+    let styles = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/styles.css"))
+        .expect("read manager styles");
+
+    assert!(styles.contains(".private-chat-dialog > header strong"));
+    assert!(styles.contains("grid-template-columns: 1fr auto 1fr"));
+    assert!(chat.contains("private-chat-avatar admin"));
+    assert!(chat.contains("UserRound"));
+}
+
+#[test]
+fn tray_icon_has_a_codework_name_tooltip() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let library = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))
+        .expect("read manager library");
+
+    assert!(library.contains("TRAY_TOOLTIP"));
+    assert!(library.contains(".tooltip(TRAY_TOOLTIP)"));
+}
+
+#[test]
+fn activity_opens_the_official_portal_with_the_member_ticket_handoff() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/App.tsx"))
+        .expect("read manager App.tsx");
+    let injector = std::fs::read_to_string(manifest_dir.join("../../../assets/inject/renderer-inject.js"))
+        .expect("read renderer injector");
+
+    assert!(app.contains("client_portal_link"));
+    assert!(app.contains("CODEWORK_ACTIVITY_PORTAL_URL"));
+    assert!(injector.contains("http://115.190.199.191:20080/download"));
+    assert!(!injector.contains("github.com/BigPizzaV3/CodexPlusPlus"));
+}
+
+#[test]
+fn manager_exposes_the_community_and_admin_experience_routes() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.parent().unwrap().join("src/App.tsx"))
+        .expect("read manager App.tsx");
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+
+    assert!(app.contains("community"));
+    assert!(app.contains("超话"));
+    assert!(app.contains("身份体验"));
+    assert!(commands.contains("pub async fn community_comments"));
+    assert!(commands.contains("pub async fn post_community_comment"));
+    assert!(commands.contains("pub async fn delete_community_comment"));
+}
+
+#[test]
 fn codework_installer_is_independent_and_packages_notices() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = manifest_dir.join("../../..");
@@ -458,12 +577,14 @@ fn codework_installer_is_independent_and_packages_notices() {
     .expect("read Codework NSIS installer");
     let build_script = std::fs::read_to_string(root.join("scripts/build-codework-windows.ps1"))
         .expect("read Codework build script");
+    let frontend_brand = std::fs::read_to_string(root.join("apps/codex-plus-manager/src/codework.ts"))
+        .expect("read Codework frontend brand");
     let notices = std::fs::read_to_string(root.join("THIRD_PARTY_NOTICES.txt"))
         .expect("read third-party notices");
 
-    assert!(nsi.contains("Name \"Codework Codex++\""));
+    assert!(nsi.contains("Name \"♛Codework AI客户端\""));
     assert!(nsi.contains("InstallDir \"$LOCALAPPDATA\\Programs\\Codework Codex++\""));
-    assert!(nsi.contains("Codework-CodexPlusPlus-${VERSION}-windows-x64-setup.exe"));
+    assert!(nsi.contains("♛Codework AI客户端-${VERSION}-windows-x64-setup.exe"));
     assert!(nsi.contains("codework-codex-plus-plus.exe"));
     assert!(nsi.contains("codework-codex-plus-plus-manager.exe"));
     assert!(nsi.contains("THIRD_PARTY_NOTICES.txt"));
@@ -488,7 +609,7 @@ fn codework_installer_is_independent_and_packages_notices() {
         "Assert-NativeSuccess 'npm ci' $LASTEXITCODE",
         "Assert-NativeSuccess 'npm run check' $LASTEXITCODE",
         "Assert-NativeSuccess 'npm run vite:build' $LASTEXITCODE",
-        "Assert-NativeSuccess 'cargo test --workspace --jobs 1' $LASTEXITCODE",
+        "Assert-NativeSuccess 'cargo test --workspace --exclude codex-plus-manager --jobs 1' $LASTEXITCODE",
         "Assert-NativeSuccess 'cargo build --release --jobs 1' $LASTEXITCODE",
         "Assert-NativeSuccess 'makensis' $LASTEXITCODE",
     ] {
@@ -506,12 +627,87 @@ fn codework_installer_is_independent_and_packages_notices() {
     ));
     assert!(!build_script.contains("$forbidden = '"));
     assert!(build_script.contains("$requiredBinaryStrings = @("));
+    assert!(build_script.contains("$publicProductName = -join (0x265B"));
+    assert!(build_script.contains("$releaseDir = Join-Path $releaseRoot \"$publicProductName-$version\""));
     assert!(build_script.contains("$requiredFrontendStrings = @("));
     assert!(build_script.contains("& rg -F -a -l -- $requiredText $stage"));
     assert!(build_script.contains("& rg -F -l -- $requiredText (Join-Path $manager 'dist')"));
     assert!(!build_script.contains("$requiredPattern ="));
+    assert!(frontend_brand.contains("CODEWORK_PRODUCT_NAME = \"♛Codework AI客户端\""));
     assert!(notices.contains("MIT License"));
     assert!(notices.contains("https://github.com/BigPizzaV3/CodexPlusPlus"));
+    assert!(notices.contains("https://github.com/Fei-Away/Codex-Dream-Skin"));
+}
+
+#[test]
+fn manager_requires_member_login_before_showing_the_workspace_and_exposes_activity_center() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
+        .expect("read manager app");
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+    let build_script = std::fs::read_to_string(manifest_dir.join("../../../scripts/build-codework-windows.ps1"))
+        .expect("read Codework build script");
+
+    assert!(app.contains("MemberLoginGate"));
+    assert!(app.contains("CODEWORK_OFFICIAL_ACCOUNT_LABEL"));
+    assert!(app.contains("官方账号"));
+    assert!(app.contains("const [memberLoginApproved, setMemberLoginApproved] = useState(false);"));
+    assert!(app.contains("setMemberLoginApproved(true);"));
+    assert!(app.contains("setRoute(\"account\");"));
+    assert!(app.contains("visible={!memberLoginApproved}"));
+    assert!(app.contains("id: \"activity\""));
+    assert!(app.contains("ActivityCenterScreen"));
+    assert!(app.contains("id: \"updates\""));
+    assert!(app.contains("ReleaseNotesScreen"));
+    assert!(app.contains("MEMBER_REMEMBERED_CREDENTIALS_KEY"));
+    assert!(app.contains("CODEWORK_FORGOT_PASSWORD_URL"));
+    assert!(app.contains("CODEWORK_QQ_QR_URL"));
+    assert!(app.contains("CODEWORK_WECHAT_QR_URL"));
+    assert!(app.contains("CODEWORK_ACTIVITY_PORTAL_URL"));
+    assert!(app.contains("client_portal_link"));
+    assert!(!app.contains("UPSTREAM_SOURCE_URL"));
+    assert!(app.contains("client_activity"));
+    assert!(commands.contains("pub async fn client_activity"));
+    assert!(commands.contains("pub async fn client_portal_link"));
+    assert!(build_script.contains("$releaseNotesPath"));
+    assert!(build_script.contains("$tipsPath"));
+    assert!(!build_script.contains("<#"));
+    assert!(build_script.contains("Compress-Archive"));
+}
+
+#[test]
+fn updater_silently_overwrites_then_restarts_the_new_manager() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs"))
+        .expect("read manager commands");
+    let installer = std::fs::read_to_string(
+        manifest_dir.join("../../../scripts/installer/windows/CodeworkCodexPlusPlus.nsi"),
+    )
+    .expect("read NSIS installer");
+
+    assert!(commands.contains("codework_release_installer_args"));
+    assert!(commands.contains("/UPDATE"));
+    assert!(installer.contains("IfSilent silent_update_finished normal_install_finished"));
+    assert!(installer.contains("codework-codex-plus-plus-manager.exe"));
+    assert!(installer.contains("--confirm-update"));
+}
+
+#[test]
+fn installer_waits_for_new_manager_and_restores_previous_binaries_on_timeout() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let installer = std::fs::read_to_string(
+        manifest_dir.join("../../../scripts/installer/windows/CodeworkCodexPlusPlus.nsi"),
+    )
+    .expect("read Codework NSIS installer");
+
+    assert!(installer.contains("codework-codex-plus-plus.exe.previous"));
+    assert!(installer.contains("codework-codex-plus-plus-manager.exe.previous"));
+    assert!(installer.contains("--confirm-update"));
+    assert!(installer.contains("update-start-confirmed.json"));
+    assert!(installer.contains("update-rollback.json"));
+    assert!(installer.contains("rollback_update"));
+    assert!(!installer.contains("manager.exe /F /T"));
 }
 
 #[test]
@@ -528,16 +724,22 @@ fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
 
     assert!(app.contains("id: \"visualTheme\""));
     assert!(app.contains("VisualThemeScreen"));
-    assert!(app.contains("/v1/themes/manifest"));
+    assert!(app.contains("load_visual_theme_manifest"));
+    assert!(app.contains("load_visual_theme_asset"));
     assert!(app.contains("codework-theme-manifest-cache"));
     assert!(app.contains("isSafeThemeManifest"));
     assert!(app.contains("lastSavedThemeServiceUrlRef"));
     assert!(renderer.contains("applyCodeworkVisualTheme"));
     assert!(renderer.contains("isSafeCodeworkThemeManifest"));
     assert!(renderer.contains("codeworkVisualThemeCssFromTokens"));
-    assert!(renderer.contains("/v1/themes/manifest"));
+    assert!(renderer.contains("[data-codework-theme-scope]"));
+    assert!(!renderer.contains("#root{background-color:var(--codework-theme-background)!important"));
+    assert!(!renderer.contains("aside *{color:var(--codework-theme-text)!important}"));
+    assert!(renderer.contains("window.__codexSessionDeleteBridge(\"/theme/manifest\", {})"));
+    assert!(renderer.contains("restoreCodeworkCharacterTheme"));
+    assert!(renderer.contains("data-codework-character-theme"));
     assert!(app.contains("new URL("));
-    assert!(app.contains("AbortController"));
+    assert!(renderer.contains("AbortController"));
     assert!(renderer.contains("codexAppVisualThemeEnabled"));
     assert!(renderer.contains("codexAppVisualThemeId"));
     assert!(settings.contains("codex_app_visual_theme_enabled"));
@@ -545,7 +747,7 @@ fn visual_theme_pro_has_a_dedicated_route_and_safe_injection_settings() {
 }
 
 #[test]
-fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
+fn visual_theme_service_has_a_1panel_deployment_and_restricted_character_manifest() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = manifest_dir.join("../../..");
     let app = std::fs::read_to_string(manifest_dir.join("../src/App.tsx"))
@@ -567,9 +769,16 @@ fn visual_theme_service_has_a_1panel_deployment_and_public_manifest() {
     assert!(app.contains("codexAppVisualThemeServiceUrl"));
     assert!(settings.contains("codex_app_visual_theme_service_url"));
     let manifest: serde_json::Value = serde_json::from_str(&themes).expect("parse theme manifest");
-    assert_eq!(manifest["version"], "1.0.0");
+    assert_eq!(manifest["version"], "1.2.0");
     let themes = manifest["themes"].as_array().expect("themes array");
-    assert_eq!(themes.len(), 4);
+    assert_eq!(themes.len(), 3);
+    assert!(themes.iter().any(|theme| theme["id"] == "hello-kitty-christmas" && theme["access"] == "restricted"));
+    assert!(themes.iter().any(|theme|
+        theme["id"] == "shinchan-energy"
+            && theme["cssProfile"] == "dream-skin-light"
+            && theme["art"]["safeArea"] == "left"
+            && theme["art"]["taskMode"] == "ambient"
+    ));
 
     let mut theme_ids = std::collections::HashSet::new();
     for theme in themes {
