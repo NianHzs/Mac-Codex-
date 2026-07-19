@@ -15,14 +15,20 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 async-trait = "0.1"
 codex-plus-core = { path = "../../../crates/codex-plus-core" }
 codex-plus-data = { path = "../../../crates/codex-plus-data" }
 directories.workspace = true
+ed25519-dalek.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = ["custom-protocol", "tray-icon"] }
 tauri-plugin-dialog = "2"
+url.workspace = true
+urlencoding = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

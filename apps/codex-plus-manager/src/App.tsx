@@ -18,7 +18,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getAvailableCodeworkRelease, getCodeworkUpdateSteps } from "./release";
+import {
+  getAvailableCodeworkRelease,
+  getCodeworkReleaseDisplay,
+  getCodeworkUpdateStageLabel,
+  getCodeworkUpdateSteps,
+} from "./release";
 import { PrivateChat, type ChatFriend, type ChatMessage, type IncomingFriendRequest, type OutgoingFriendRequest, type FriendSearchResult, type PresenceStatus } from "./private-chat";
 import { getPresenceUpdateFeedback, shouldNotifyIncomingMessage } from "./private-chat-state";
 import { isAnnouncementUnread, normalizeAnnouncementFeed, type AnnouncementFeed, type ClientAnnouncement } from "./announcement";
@@ -152,6 +157,14 @@ type CodeworkReleaseResult = CommandResult<{
   latestVersion: string | null;
   downloadUrl: string | null;
   notes: string[];
+  pendingTargetVersion: string | null;
+  integrityStatus: string;
+  expectedSize: number | null;
+  sha256: string | null;
+  mandatory: boolean;
+  minimumSupportedVersion: string | null;
+  rollbackAvailable: boolean;
+  lastFailure: string | null;
 }>;
 
 type ChatGptInstallResult = CommandResult<{
@@ -204,6 +217,7 @@ type InstallerProgress = {
   downloadedBytes?: number;
   totalBytes?: number;
   percent?: number;
+  error?: string;
 };
 
 type MemberProfileResult = CommandResult<MemberProfile>;
@@ -3145,15 +3159,9 @@ function AnnouncementManagementScreen({ draft, editingId, feed, onDraftChange, o
 }
 
 function formatInstallStage(stage?: string) {
-  if (stage === "checking") return "正在检测";
-  if (stage === "downloading") return "正在下载";
-  if (stage === "downloaded") return "下载完成，正在校验更新包";
-  if (stage === "installing") return "正在覆盖安装，完成后自动重启";
-  if (stage === "closing") return "正在关闭旧客户端，安装完成后自动启动新版";
-  if (stage === "relaunching") return "正在启动新版客户端";
   if (stage === "creatingShortcut") return "正在创建桌面快捷方式";
   if (stage === "completed") return "已完成";
-  return "等待操作";
+  return getCodeworkUpdateStageLabel(stage);
 }
 
 function ReleaseNotesScreen({
@@ -3168,9 +3176,15 @@ function ReleaseNotesScreen({
   onInstall: () => Promise<void>;
 }) {
   const available = isSuccessStatus(release?.status) && Boolean(release?.available);
+  const releaseDisplay = release?.currentVersion && release?.latestVersion
+    ? getCodeworkReleaseDisplay({ currentVersion: release.currentVersion, latestVersion: release.latestVersion, pendingTargetVersion: release.pendingTargetVersion })
+    : null;
+  const updateIncomplete = releaseDisplay?.state === "update_incomplete";
+  const updateActionable = available || updateIncomplete;
   const percentage = progress?.percent;
   const updateSteps = getCodeworkUpdateSteps(progress?.stage);
   const currentUpdateStep = progress ? Math.max(0, updateSteps.indexOf(progress.stage as typeof updateSteps[number])) : -1;
+  const integrityVerified = release?.integrityStatus === "verified_manifest";
   return (
     <>
       <Panel className="release-hero">
@@ -3179,20 +3193,23 @@ function ReleaseNotesScreen({
             <div className="release-mark"><Download aria-hidden="true" /></div>
             <div>
               <p className="eyebrow">CODEWORK AI CLIENT</p>
-              <h2>当前版本 {release?.currentVersion ?? "读取中"}</h2>
-              <p>{available ? `发现新版本 ${release?.latestVersion}，点击后将自动下载、覆盖安装并重启新版。` : "启动时会自动检测新版本；暂不更新不影响继续使用。"}</p>
+              <h2>正在运行的管理端 {releaseDisplay?.runningVersion ?? release?.currentVersion ?? "读取中"}</h2>
+              <p>{updateIncomplete ? `上一次安装未确认完成：当前仍是 ${release?.currentVersion}，可重新更新，原有配置会保留。` : available ? `发现新版本 ${release?.latestVersion}，点击后将自动下载、覆盖安装并重启新版。` : "启动时会自动检测新版本；暂不更新不影响继续使用。"}</p>
             </div>
-            <span className="release-current-chip">{available ? "发现新版本" : "已是最新版本"}</span>
+            <span className="release-current-chip">{updateIncomplete ? "安装未完成" : available ? "发现新版本" : "已是最新版本"}</span>
           </div>
         </CardContent>
       </Panel>
       <Panel>
         <CardHead title={available ? `新版本 ${release?.latestVersion}` : "版本更新"} detail="一键更新会保留本机供应商和客户端配置，安装结束后自动启动新版。" />
         <CardContent>
+          {updateIncomplete ? <p className="muted-copy">上一次更新未能确认管理端已经替换完成。请点击“重新更新”，客户端会先退出管理端再覆盖安装。</p> : null}
+          {release ? <div className="release-actions"><UiBadge>{integrityVerified ? "发布清单签名已验证" : "等待完整性验证"}</UiBadge>{release.expectedSize ? <span className="muted-copy">安装包 {formatBytes(release.expectedSize)}</span> : null}{release.sha256 ? <span className="muted-copy">SHA-256 已提供</span> : null}{release.mandatory ? <UiBadge>重要更新</UiBadge> : null}</div> : null}
+          {release?.lastFailure ? <p className="muted-copy">上次更新失败原因：{release.lastFailure}</p> : null}
           {release?.notes?.length ? <ul className="release-note-list">{release.notes.map((note) => <li key={note}>{note}</li>)}</ul> : <p className="muted-copy">点击“重新检测”即可读取最新版本与更新说明。</p>}
           <div className="release-actions">
             <Button onClick={() => void onCheck()} variant="outline"><RefreshCw className="h-4 w-4" />重新检测</Button>
-            {available ? <Button onClick={() => void onInstall()}><Download className="h-4 w-4" />立即更新</Button> : null}
+            {updateActionable ? <Button onClick={() => void onInstall()}><Download className="h-4 w-4" />{updateIncomplete ? "重新更新" : "立即更新"}</Button> : null}
           </div>
           {progress ? <div className="release-progress"><strong>{formatInstallStage(progress.stage)}</strong><span>{percentage !== undefined ? `${percentage}% · ` : ""}{formatBytes(progress.downloadedBytes ?? 0)}{progress.totalBytes ? ` / ${formatBytes(progress.totalBytes)}` : ""}</span><div><i style={{ width: `${percentage ?? 12}%` }} /></div></div> : null}
           {progress ? <ol className="release-step-list">{updateSteps.map((stage, index) => <li className={index <= currentUpdateStep ? "active" : ""} key={stage}>{formatInstallStage(stage)}</li>)}</ol> : null}

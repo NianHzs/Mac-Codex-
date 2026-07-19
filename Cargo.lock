@@ -481,6 +481,7 @@ dependencies = [
  "codex-plus-core",
  "codex-plus-data",
  "directories",
+ "ed25519-dalek",
  "futures-util",
  "reqwest 0.12.28",
  "rusqlite",

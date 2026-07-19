@@ -3,9 +3,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use codex_plus_core::release_manifest::{
     SignedReleaseManifest, parse_release_version, sha256_file,
 };
+use ed25519_dalek::VerifyingKey;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,6 +18,8 @@ use crate::commands::{CommandResult, failed, ok};
 const CODEWORK_RELEASE_MANIFEST_URL: &str =
     "http://115.190.199.191:20080/downloads/codework-ai-client-windows.json";
 pub const RELEASE_PROGRESS_EVENT: &str = "codework-release-progress";
+const EMBEDDED_RELEASE_PUBLIC_KEY: &str =
+    include_str!("../../../../release-assets/codework-release-public-key.txt");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +146,10 @@ pub async fn install_codework_release(
         Ok(path) => path,
         Err(error) => {
             payload.last_failure = Some(error.to_string());
+            let _ = app.emit(
+                RELEASE_PROGRESS_EVENT,
+                json!({ "stage": "failed", "error": error.to_string() }),
+            );
             return failed(&format!("客户端下载或校验失败：{error}"), payload);
         }
     };
@@ -174,6 +182,10 @@ pub async fn install_codework_release(
         Err(error) => {
             let _ = record_pending_update_failure(&error.to_string());
             payload.last_failure = Some(error.to_string());
+            let _ = app.emit(
+                RELEASE_PROGRESS_EVENT,
+                json!({ "stage": "rollback", "error": error.to_string() }),
+            );
             failed(&format!("无法启动更新安装程序：{error}"), payload)
         }
     }
@@ -297,6 +309,7 @@ async fn fetch_codework_release_manifest() -> anyhow::Result<SignedReleaseManife
         .error_for_status()?;
     let manifest: SignedReleaseManifest = response.json().await?;
     manifest.validate_shape()?;
+    manifest.verify(&embedded_release_public_key()?)?;
     Ok(manifest)
 }
 
@@ -339,14 +352,6 @@ async fn download_codework_release(
     }
     output.flush()?;
     drop(output);
-    if let Err(error) = verify_downloaded_installer(&partial_path, manifest) {
-        let _ = fs::remove_file(&partial_path);
-        return Err(error);
-    }
-    if installer_path.exists() {
-        fs::remove_file(&installer_path)?;
-    }
-    fs::rename(&partial_path, &installer_path)?;
     let _ = app.emit(
         RELEASE_PROGRESS_EVENT,
         json!({
@@ -356,12 +361,57 @@ async fn download_codework_release(
             "percent": 100_u64
         }),
     );
+    let _ = app.emit(
+        RELEASE_PROGRESS_EVENT,
+        json!({
+            "stage": "verifying",
+            "downloadedBytes": downloaded,
+            "totalBytes": manifest.size,
+            "percent": 100_u64
+        }),
+    );
+    if let Err(error) = verify_downloaded_installer(&partial_path, manifest) {
+        let _ = fs::remove_file(&partial_path);
+        let _ = fs::remove_file(&installer_path);
+        let _ = clear_pending_codework_update();
+        let _ = app.emit(
+            RELEASE_PROGRESS_EVENT,
+            json!({
+                "stage": "integrity_failed",
+                "error": error.to_string(),
+                "downloadedBytes": downloaded,
+                "totalBytes": manifest.size,
+                "percent": 100_u64
+            }),
+        );
+        anyhow::bail!("安装包校验失败，当前版本未受影响：{error}");
+    }
+    if installer_path.exists() {
+        fs::remove_file(&installer_path)?;
+    }
+    fs::rename(&partial_path, &installer_path)?;
     Ok(installer_path)
+}
+
+fn embedded_release_public_key() -> anyhow::Result<VerifyingKey> {
+    let bytes: [u8; 32] = base64::engine::general_purpose::STANDARD
+        .decode(EMBEDDED_RELEASE_PUBLIC_KEY.trim())?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("内置发布公钥必须为 32 字节"))?;
+    VerifyingKey::from_bytes(&bytes).map_err(Into::into)
 }
 
 fn verify_downloaded_installer(
     installer_path: &Path,
     manifest: &SignedReleaseManifest,
+) -> anyhow::Result<()> {
+    verify_downloaded_installer_with_key(installer_path, manifest, &embedded_release_public_key()?)
+}
+
+fn verify_downloaded_installer_with_key(
+    installer_path: &Path,
+    manifest: &SignedReleaseManifest,
+    public_key: &VerifyingKey,
 ) -> anyhow::Result<()> {
     let actual_size = fs::metadata(installer_path)?.len();
     anyhow::ensure!(
@@ -375,14 +425,19 @@ fn verify_downloaded_installer(
         actual_sha256.eq_ignore_ascii_case(manifest.sha256.trim()),
         "安装包 SHA-256 校验失败"
     );
+    manifest.verify(public_key)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use codex_plus_core::release_manifest::SignedReleaseManifest;
+    use ed25519_dalek::SigningKey;
 
-    use super::{PendingCodeworkUpdate, payload_from_manifest, verify_downloaded_installer};
+    use super::{
+        PendingCodeworkUpdate, embedded_release_public_key, payload_from_manifest,
+        verify_downloaded_installer_with_key,
+    };
 
     fn fixture_manifest() -> SignedReleaseManifest {
         SignedReleaseManifest {
@@ -424,15 +479,80 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let installer = temp.path().join("setup.exe");
         std::fs::write(&installer, b"abc").unwrap();
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let mut manifest = fixture_manifest();
         manifest.size = 3;
         manifest.sha256 =
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_string();
+        manifest.sign_with(&signing_key);
 
-        assert!(verify_downloaded_installer(&installer, &manifest).is_ok());
+        assert!(
+            verify_downloaded_installer_with_key(
+                &installer,
+                &manifest,
+                &signing_key.verifying_key(),
+            )
+            .is_ok()
+        );
 
         manifest.size = 4;
-        assert!(verify_downloaded_installer(&installer, &manifest).is_err());
+        manifest.sign_with(&signing_key);
+        assert!(
+            verify_downloaded_installer_with_key(
+                &installer,
+                &manifest,
+                &signing_key.verifying_key(),
+            )
+            .is_err()
+        );
+
+        manifest.size = 3;
+        manifest.sha256 = "0".repeat(64);
+        manifest.sign_with(&signing_key);
+        assert!(
+            verify_downloaded_installer_with_key(
+                &installer,
+                &manifest,
+                &signing_key.verifying_key(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn downloaded_installer_rejects_an_invalid_release_signature() {
+        let temp = tempfile::tempdir().unwrap();
+        let installer = temp.path().join("setup.exe");
+        std::fs::write(&installer, b"abc").unwrap();
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let wrong_key = SigningKey::from_bytes(&[8_u8; 32]);
+        let mut manifest = fixture_manifest();
+        manifest.size = 3;
+        manifest.sha256 =
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_string();
+        manifest.sign_with(&signing_key);
+
+        assert!(
+            verify_downloaded_installer_with_key(
+                &installer,
+                &manifest,
+                &signing_key.verifying_key(),
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_downloaded_installer_with_key(
+                &installer,
+                &manifest,
+                &wrong_key.verifying_key(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn embedded_release_public_key_is_a_valid_ed25519_key() {
+        assert!(embedded_release_public_key().is_ok());
     }
 
     #[test]
