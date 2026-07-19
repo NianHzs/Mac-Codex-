@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod install;
+pub mod release_update;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,6 +16,7 @@ const TRAY_MENU_QUIT: &str = "tray_quit_app";
 
 pub fn run() {
     install_panic_logger();
+    let _ = release_update::reconcile_pending_codework_update();
     let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
         "manager.start",
         serde_json::json!({
@@ -46,6 +48,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::backend_version,
+            release_update::check_codework_release,
+            release_update::install_codework_release,
             commands::load_overview,
             commands::launch_codex_plus,
             commands::restart_codex_plus,
@@ -187,6 +191,10 @@ fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R
 
 #[tauri::command]
 fn manager_exit_app<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    exit_manager_for_update(app);
+}
+
+pub(crate) fn exit_manager_for_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     APP_EXITING.store(true, Ordering::SeqCst);
     app.exit(0);
 }

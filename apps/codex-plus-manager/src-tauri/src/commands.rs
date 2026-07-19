@@ -935,7 +935,6 @@ pub fn backend_version() -> CommandResult<VersionPayload> {
     )
 }
 
-#[tauri::command]
 pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
     let current_version = codex_plus_core::version::DISPLAY_VERSION.to_string();
     match fetch_codework_release_manifest().await {
@@ -967,7 +966,6 @@ pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
     }
 }
 
-#[tauri::command]
 pub async fn install_codework_release(
     app: tauri::AppHandle,
 ) -> CommandResult<CodeworkReleasePayload> {
@@ -4140,7 +4138,7 @@ fn shortcut_state(shortcut: install::ShortcutState) -> PathState {
     }
 }
 
-fn ok<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
+pub(crate) fn ok<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     CommandResult {
         status: "ok".to_string(),
         message: message.to_string(),
@@ -4148,7 +4146,7 @@ fn ok<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     }
 }
 
-fn failed<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
+pub(crate) fn failed<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     CommandResult {
         status: "failed".to_string(),
         message: message.to_string(),
