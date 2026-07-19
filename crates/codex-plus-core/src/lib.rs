@@ -31,6 +31,7 @@ pub mod relay_switch;
 pub mod release_manifest;
 pub mod routes;
 pub mod script_market;
+pub mod secret_store;
 pub mod skill_market;
 pub mod settings;
 pub mod status;
