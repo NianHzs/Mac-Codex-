@@ -1,13 +1,21 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use toml_edit::{DocumentMut, Item};
 
+use crate::secret_store::{MemorySecretBackend, SecretBackend, WindowsSecretBackend};
 use crate::zed_remote::ZedOpenStrategy;
+
+pub type SecretMap = BTreeMap<String, String>;
+
+const RELAY_GLOBAL_API_KEY_SECRET: &str = "relay/global/api-key";
+const STEPWISE_API_KEY_SECRET: &str = "stepwise/api-key";
+const THEME_MEMBER_TOKEN_SECRET: &str = "theme/member-token";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -667,27 +675,52 @@ pub fn normalize_codex_extra_args(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SettingsStore {
     path: PathBuf,
+    secret_backend: Arc<dyn SecretBackend>,
+}
+
+impl std::fmt::Debug for SettingsStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SettingsStore")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for SettingsStore {
     fn default() -> Self {
-        Self::new(crate::paths::default_settings_path())
+        Self::with_secret_backend(
+            crate::paths::default_settings_path(),
+            Arc::new(WindowsSecretBackend::default()),
+        )
     }
 }
 
 impl SettingsStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self::with_secret_backend(path, Arc::new(MemorySecretBackend::default()))
+    }
+
+    pub fn with_secret_backend(
+        path: PathBuf,
+        secret_backend: Arc<dyn SecretBackend>,
+    ) -> Self {
+        Self {
+            path,
+            secret_backend,
+        }
     }
 
     pub fn load(&self) -> anyhow::Result<BackendSettings> {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(BackendSettings::default());
+                let public = BackendSettings::default();
+                let secrets = self.load_settings_secrets()?;
+                return Ok(hydrate_settings_secrets(public, &secrets));
             }
             Err(error) => {
                 return Err(error)
@@ -695,16 +728,24 @@ impl SettingsStore {
             }
         };
 
-        Ok(normalize_settings_config_sections(
+        let settings = normalize_settings_config_sections(
             serde_json::from_str(&contents).unwrap_or_default(),
-        ))
+        );
+        let (public, legacy_secrets) = split_settings_secrets(settings);
+        if !legacy_secrets.is_empty() {
+            self.persist_settings_secrets(&legacy_secrets)?;
+            self.write_public_settings(&public)?;
+        }
+        let secrets = self.load_settings_secrets()?;
+        Ok(hydrate_settings_secrets(public, &secrets))
     }
 
     pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         let mut settings = normalize_settings_config_sections(settings.clone());
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
-        let bytes = serde_json::to_vec_pretty(&settings)?;
-        atomic_write(&self.path, &bytes)
+        let (public, secrets) = split_settings_secrets(settings);
+        self.persist_settings_secrets(&secrets)?;
+        self.write_public_settings(&public)
     }
 
     pub fn update(&self, payload: Value) -> anyhow::Result<BackendSettings> {
@@ -713,21 +754,64 @@ impl SettingsStore {
         };
 
         let mut raw = self.load_raw_object()?;
-        merge_known_setting_fields(&mut raw, &payload);
+        let mut merged = raw.clone();
+        overlay_settings_secret_fields(&mut merged, &settings_to_object(&self.load()?));
+        merge_known_setting_fields(&mut merged, &payload);
+        let merged_settings: BackendSettings =
+            serde_json::from_value(Value::Object(merged)).unwrap_or_default();
+        let (raw_public, _) = split_settings_secrets(merged_settings.clone());
         let settings = normalize_settings_config_sections(
-            serde_json::from_value(Value::Object(raw.clone())).unwrap_or_default(),
+            merged_settings,
         );
+        let (public, secrets) = split_settings_secrets(settings);
+        self.persist_settings_secrets(&secrets)?;
+        let raw_public = settings_to_object(&raw_public);
+        for key in payload.keys() {
+            if let Some(value) = raw_public.get(key) {
+                raw.insert(key.clone(), value.clone());
+            }
+        }
         raw.insert(
             "relayCommonConfigContents".to_string(),
-            Value::String(settings.relay_common_config_contents.clone()),
+            Value::String(public.relay_common_config_contents.clone()),
         );
         raw.insert(
             "relayContextConfigContents".to_string(),
-            Value::String(settings.relay_context_config_contents.clone()),
+            Value::String(public.relay_context_config_contents.clone()),
         );
         let bytes = serde_json::to_vec_pretty(&Value::Object(raw))?;
         atomic_write(&self.path, &bytes)?;
-        Ok(settings)
+        Ok(hydrate_settings_secrets(public, &secrets))
+    }
+
+    fn write_public_settings(&self, settings: &BackendSettings) -> anyhow::Result<()> {
+        let bytes = serde_json::to_vec_pretty(settings)?;
+        atomic_write(&self.path, &bytes)
+    }
+
+    fn persist_settings_secrets(&self, secrets: &SecretMap) -> anyhow::Result<()> {
+        for key in self.secret_backend.list_keys()? {
+            if is_settings_secret_key(&key) && !secrets.contains_key(&key) {
+                self.secret_backend.delete(&key)?;
+            }
+        }
+        for (key, value) in secrets {
+            self.secret_backend.set(key, value)?;
+        }
+        Ok(())
+    }
+
+    fn load_settings_secrets(&self) -> anyhow::Result<SecretMap> {
+        let mut secrets = SecretMap::new();
+        for key in self.secret_backend.list_keys()? {
+            if !is_settings_secret_key(&key) {
+                continue;
+            }
+            if let Some(value) = self.secret_backend.get(&key)? {
+                secrets.insert(key, value);
+            }
+        }
+        Ok(secrets)
     }
 
     fn load_raw_object(&self) -> anyhow::Result<Map<String, Value>> {
@@ -747,6 +831,205 @@ impl SettingsStore {
             Ok(_) | Err(_) => Ok(settings_to_object(&BackendSettings::default())),
         }
     }
+}
+
+fn overlay_settings_secret_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    for key in [
+        "relayApiKey",
+        "codexAppStepwiseApiKey",
+        "codexAppVisualThemeMemberToken",
+        "relayProfiles",
+    ] {
+        if let Some(value) = source.get(key) {
+            target.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+pub fn split_settings_secrets(mut settings: BackendSettings) -> (BackendSettings, SecretMap) {
+    let mut secrets = SecretMap::new();
+    take_secret(
+        &mut settings.relay_api_key,
+        RELAY_GLOBAL_API_KEY_SECRET,
+        &mut secrets,
+    );
+    take_secret(
+        &mut settings.codex_app_stepwise_api_key,
+        STEPWISE_API_KEY_SECRET,
+        &mut secrets,
+    );
+    take_secret(
+        &mut settings.codex_app_visual_theme_member_token,
+        THEME_MEMBER_TOKEN_SECRET,
+        &mut secrets,
+    );
+
+    for profile in &mut settings.relay_profiles {
+        let prefix = relay_profile_secret_prefix(&profile.id);
+        take_secret(
+            &mut profile.api_key,
+            &format!("{prefix}/api-key"),
+            &mut secrets,
+        );
+        if !profile.auth_contents.trim().is_empty() {
+            secrets.insert(
+                format!("{prefix}/auth-contents"),
+                std::mem::take(&mut profile.auth_contents),
+            );
+        }
+        match strip_experimental_bearer_tokens(&profile.config_contents) {
+            Ok((public_config, bearer_tokens)) => {
+                profile.config_contents = public_config;
+                if !bearer_tokens.is_empty() {
+                    secrets.insert(
+                        format!("{prefix}/experimental-bearer-token"),
+                        serde_json::to_string(&bearer_tokens).unwrap_or_default(),
+                    );
+                }
+            }
+            Err(_) if profile.config_contents.contains("experimental_bearer_token") => {
+                secrets.insert(
+                    format!("{prefix}/config-contents"),
+                    std::mem::take(&mut profile.config_contents),
+                );
+            }
+            Err(_) => {}
+        }
+    }
+
+    (settings, secrets)
+}
+
+pub fn hydrate_settings_secrets(
+    mut settings: BackendSettings,
+    secrets: &SecretMap,
+) -> BackendSettings {
+    restore_secret(
+        &mut settings.relay_api_key,
+        RELAY_GLOBAL_API_KEY_SECRET,
+        secrets,
+    );
+    restore_secret(
+        &mut settings.codex_app_stepwise_api_key,
+        STEPWISE_API_KEY_SECRET,
+        secrets,
+    );
+    restore_secret(
+        &mut settings.codex_app_visual_theme_member_token,
+        THEME_MEMBER_TOKEN_SECRET,
+        secrets,
+    );
+
+    for profile in &mut settings.relay_profiles {
+        let prefix = relay_profile_secret_prefix(&profile.id);
+        restore_secret(
+            &mut profile.api_key,
+            &format!("{prefix}/api-key"),
+            secrets,
+        );
+        if let Some(auth_contents) = secrets.get(&format!("{prefix}/auth-contents")) {
+            profile.auth_contents = auth_contents.clone();
+        }
+        if let Some(config_contents) = secrets.get(&format!("{prefix}/config-contents")) {
+            profile.config_contents = config_contents.clone();
+        } else if let Some(encoded_tokens) =
+            secrets.get(&format!("{prefix}/experimental-bearer-token"))
+        {
+            if let Ok(tokens) = serde_json::from_str::<BTreeMap<String, String>>(encoded_tokens) {
+                profile.config_contents = restore_experimental_bearer_tokens(
+                    &profile.config_contents,
+                    &tokens,
+                )
+                .unwrap_or_else(|_| profile.config_contents.clone());
+            }
+        }
+    }
+
+    settings
+}
+
+fn take_secret(value: &mut String, key: &str, secrets: &mut SecretMap) {
+    let secret = value.trim().to_string();
+    value.clear();
+    if !secret.is_empty() {
+        secrets.insert(key.to_string(), secret);
+    }
+}
+
+fn restore_secret(value: &mut String, key: &str, secrets: &SecretMap) {
+    if let Some(secret) = secrets.get(key) {
+        *value = secret.clone();
+    }
+}
+
+fn relay_profile_secret_prefix(profile_id: &str) -> String {
+    let profile_id = profile_id.trim();
+    let safe_id = if !profile_id.is_empty()
+        && profile_id.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
+        })
+    {
+        profile_id.to_string()
+    } else {
+        profile_id
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    format!("relay/profile/{safe_id}")
+}
+
+fn is_settings_secret_key(key: &str) -> bool {
+    matches!(
+        key,
+        RELAY_GLOBAL_API_KEY_SECRET | STEPWISE_API_KEY_SECRET | THEME_MEMBER_TOKEN_SECRET
+    ) || key.starts_with("relay/profile/")
+}
+
+fn strip_experimental_bearer_tokens(
+    contents: &str,
+) -> anyhow::Result<(String, BTreeMap<String, String>)> {
+    let mut document = parse_toml_document(contents)?;
+    let active_provider = active_provider_id(&document);
+    let mut tokens = BTreeMap::new();
+    if let Some(providers) = document
+        .get_mut("model_providers")
+        .and_then(Item::as_table_mut)
+    {
+        for (provider_id, item) in providers.iter_mut() {
+            let provider_id = provider_id.to_string();
+            let Some(provider) = item.as_table_like_mut() else {
+                continue;
+            };
+            let Some(token) = provider
+                .get("experimental_bearer_token")
+                .and_then(Item::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+            else {
+                continue;
+            };
+            provider.remove("experimental_bearer_token");
+            if active_provider.as_deref() == Some(provider_id.as_str()) {
+                tokens.insert(provider_id, token);
+            }
+        }
+    }
+    Ok((ensure_text_newline(document.to_string()), tokens))
+}
+
+fn restore_experimental_bearer_tokens(
+    contents: &str,
+    tokens: &BTreeMap<String, String>,
+) -> anyhow::Result<String> {
+    let mut document = parse_toml_document(contents)?;
+    for (provider_id, token) in tokens {
+        document["model_providers"][provider_id.as_str()]["experimental_bearer_token"] =
+            toml_edit::value(token);
+    }
+    Ok(ensure_text_newline(document.to_string()))
 }
 
 fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
@@ -1233,6 +1516,8 @@ fn temp_path_for(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+    use crate::secret_store::MemorySecretBackend;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -1245,6 +1530,147 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn persisted_settings_strip_all_known_secret_fields() {
+        let settings = BackendSettings {
+            relay_api_key: "sk-global-secret".to_string(),
+            codex_app_stepwise_api_key: "sk-stepwise-secret".to_string(),
+            codex_app_visual_theme_member_token: "member-theme-secret".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "main".to_string(),
+                api_key: "sk-profile-secret".to_string(),
+                config_contents: r#"model_provider = "custom"
+
+[model_providers.custom]
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-bearer-secret"
+"#
+                .to_string(),
+                auth_contents: r#"{"OPENAI_API_KEY":"sk-auth-secret","refresh_token":"refresh-secret"}"#
+                    .to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let (public, secrets) = split_settings_secrets(settings);
+        let json = serde_json::to_string(&public).unwrap();
+
+        for secret in [
+            "sk-global-secret",
+            "sk-stepwise-secret",
+            "member-theme-secret",
+            "sk-profile-secret",
+            "sk-bearer-secret",
+            "sk-auth-secret",
+            "refresh-secret",
+        ] {
+            assert!(!json.contains(secret), "persisted settings leaked {secret}");
+        }
+        assert_eq!(
+            secrets.get("relay/global/api-key").map(String::as_str),
+            Some("sk-global-secret")
+        );
+        assert_eq!(
+            secrets
+                .get("relay/profile/main/api-key")
+                .map(String::as_str),
+            Some("sk-profile-secret")
+        );
+        assert_eq!(
+            secrets.get("stepwise/api-key").map(String::as_str),
+            Some("sk-stepwise-secret")
+        );
+        assert_eq!(
+            secrets.get("theme/member-token").map(String::as_str),
+            Some("member-theme-secret")
+        );
+    }
+
+    #[test]
+    fn settings_store_save_and_update_never_write_plaintext_secrets() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        let store = SettingsStore::with_secret_backend(
+            path.clone(),
+            Arc::new(MemorySecretBackend::default()),
+        );
+        let settings = BackendSettings {
+            relay_api_key: "sk-global-secret".to_string(),
+            codex_app_stepwise_api_key: "sk-stepwise-secret".to_string(),
+            codex_app_visual_theme_member_token: "member-theme-secret".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "main".to_string(),
+                api_key: "sk-profile-secret".to_string(),
+                auth_contents: r#"{"OPENAI_API_KEY":"sk-profile-secret"}"#.to_string(),
+                ..RelayProfile::default()
+            }],
+            active_relay_id: "main".to_string(),
+            ..BackendSettings::default()
+        };
+
+        store.save(&settings).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("sk-"));
+        assert!(!saved.contains("member-theme-secret"));
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.relay_api_key, "sk-global-secret");
+        assert_eq!(loaded.relay_profiles[0].api_key, "sk-profile-secret");
+        assert_eq!(loaded.codex_app_stepwise_api_key, "sk-stepwise-secret");
+        assert_eq!(
+            loaded.codex_app_visual_theme_member_token,
+            "member-theme-secret"
+        );
+
+        let updated = store
+            .update(json!({
+                "relayApiKey": "sk-global-updated",
+                "codexAppStepwiseApiKey": "sk-stepwise-updated"
+            }))
+            .unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("sk-"));
+        assert_eq!(updated.relay_api_key, "sk-global-updated");
+        assert_eq!(updated.codex_app_stepwise_api_key, "sk-stepwise-updated");
+        assert_eq!(updated.relay_profiles[0].api_key, "sk-profile-secret");
+    }
+
+    #[test]
+    fn settings_store_load_migrates_legacy_plaintext_secrets() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "relayApiKey":"sk-legacy-global",
+                "codexAppStepwiseApiKey":"sk-legacy-stepwise",
+                "codexAppVisualThemeMemberToken":"legacy-member-token",
+                "activeRelayId":"legacy",
+                "relayProfiles":[{
+                    "id":"legacy",
+                    "name":"Legacy",
+                    "relayMode":"pureApi",
+                    "configContents":"model_provider = \"custom\"\n\n[model_providers.custom]\nexperimental_bearer_token = \"sk-legacy-bearer\"\n",
+                    "authContents":"{\"OPENAI_API_KEY\":\"sk-legacy-profile\"}"
+                }]
+            }"#,
+        )
+        .unwrap();
+        let store = SettingsStore::with_secret_backend(
+            path.clone(),
+            Arc::new(MemorySecretBackend::default()),
+        );
+
+        let loaded = store.load().unwrap();
+
+        assert_eq!(loaded.relay_api_key, "sk-legacy-global");
+        assert_eq!(loaded.codex_app_stepwise_api_key, "sk-legacy-stepwise");
+        assert_eq!(loaded.relay_profiles[0].api_key, "sk-legacy-profile");
+        let migrated = std::fs::read_to_string(&path).unwrap();
+        assert!(!migrated.contains("sk-legacy"));
+        assert!(!migrated.contains("legacy-member-token"));
     }
 
     #[test]
@@ -1617,10 +2043,10 @@ experimental_bearer_token = "sk-mix"
                 .contains("OPENAI_API_KEY")
         );
         assert!(
-            saved["relayProfiles"][0]["configContents"]
+            !saved["relayProfiles"][0]["configContents"]
                 .as_str()
                 .unwrap()
-                .contains(r#"experimental_bearer_token = "sk-mix""#)
+                .contains("sk-mix")
         );
     }
 
@@ -1670,11 +2096,9 @@ experimental_bearer_token = "sk-existing"
         let profile = &updated.relay_profiles[0];
         assert_eq!(profile.api_key, "sk-existing");
         assert!(!profile.config_contents.contains("sk-other"));
-        assert!(profile.config_contents.contains(
-            r#"[model_providers.custom]
-base_url = "https://relay.example/v1"
-experimental_bearer_token = "sk-existing""#
-        ));
+        assert!(profile.config_contents.contains(r#"[model_providers.custom]"#));
+        assert!(profile.config_contents.contains(r#"base_url = "https://relay.example/v1""#));
+        assert!(profile.config_contents.contains(r#"experimental_bearer_token = "sk-existing""#));
     }
 
     #[test]
@@ -2085,10 +2509,10 @@ experimental_bearer_token = "sk-existing""#
         assert!(saved_profile.get("baseUrl").is_none());
         assert!(saved_profile.get("apiKey").is_none());
         assert_eq!(saved_profile["configContents"], "model = \"gpt-5.4\"\n");
-        assert_eq!(
-            saved_profile["authContents"],
-            "{\"OPENAI_API_KEY\":\"sk-a\"}"
-        );
+        assert_eq!(saved_profile["authContents"], "");
+        assert!(!std::fs::read_to_string(dir.join("settings.json"))
+            .unwrap()
+            .contains("sk-a"));
     }
 
     #[test]
