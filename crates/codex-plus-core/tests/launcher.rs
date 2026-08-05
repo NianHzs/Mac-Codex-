@@ -19,7 +19,8 @@ use codex_plus_core::launcher::{
 #[cfg(windows)]
 use codex_plus_core::launcher::{WindowsProcessControlStrategy, windows_process_control_strategy};
 use codex_plus_core::ports::{
-    select_packaged_codex_debug_port_with, select_platform_loopback_port_with,
+    is_cdp_http_endpoint, select_packaged_codex_debug_port_with,
+    select_platform_loopback_port_with,
 };
 use codex_plus_core::settings::{BackendSettings, RelayProfile, RelayProtocol};
 use codex_plus_core::status::StatusStore;
@@ -333,12 +334,14 @@ fn launcher_builds_debug_arguments_and_commands() {
         build_codex_arguments(9229, &[]),
         vec![
             "--remote-debugging-port=9229".to_string(),
+            "--remote-debugging-address=127.0.0.1".to_string(),
             "--remote-allow-origins=http://127.0.0.1:9229".to_string(),
         ]
     );
     let command = build_codex_command(&app_dir, 9229, &[]);
     assert_eq!(command[1], "--remote-debugging-port=9229");
-    assert_eq!(command[2], "--remote-allow-origins=http://127.0.0.1:9229");
+    assert_eq!(command[2], "--remote-debugging-address=127.0.0.1");
+    assert_eq!(command[3], "--remote-allow-origins=http://127.0.0.1:9229");
 }
 
 #[test]
@@ -351,18 +354,12 @@ fn launcher_does_not_override_codex_app_environment() {
 }
 
 #[test]
-fn launcher_windows_process_wait_uses_platform_cfg_guards() {
+fn launcher_packaged_lifetime_uses_cdp_instead_of_the_activation_pid() {
     let source = include_str!("../src/launcher.rs").replace("\r\n", "\n");
 
-    assert!(source.contains(
-        "#[cfg(windows)]\nasync fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()>"
-    ));
-    assert!(source.contains(
-        "#[cfg(not(windows))]\nasync fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()>"
-    ));
-    assert!(source.contains(
-        "#[cfg(windows)]\nfn wait_for_windows_process_id_blocking(process_id: u32) -> anyhow::Result<()>"
-    ));
+    assert!(!source.contains("wait_for_windows_process_id"));
+    assert!(source.contains("let debug_port = launch.debug_port();"));
+    assert!(source.contains(".map(crate::ports::is_cdp_http_endpoint)"));
 }
 
 #[test]
@@ -378,6 +375,7 @@ fn launcher_appends_extra_codex_arguments_after_debug_arguments() {
         build_codex_arguments(9229, &extra_args),
         vec![
             "--remote-debugging-port=9229".to_string(),
+            "--remote-debugging-address=127.0.0.1".to_string(),
             "--remote-allow-origins=http://127.0.0.1:9229".to_string(),
             "--force_high_performance_gpu".to_string(),
             "--enable-features=UseOzonePlatform".to_string(),
@@ -385,9 +383,10 @@ fn launcher_appends_extra_codex_arguments_after_debug_arguments() {
     );
     let command = build_codex_command(&app_dir, 9229, &extra_args);
     assert_eq!(command[1], "--remote-debugging-port=9229");
-    assert_eq!(command[2], "--remote-allow-origins=http://127.0.0.1:9229");
-    assert_eq!(command[3], "--force_high_performance_gpu");
-    assert_eq!(command[4], "--enable-features=UseOzonePlatform");
+    assert_eq!(command[2], "--remote-debugging-address=127.0.0.1");
+    assert_eq!(command[3], "--remote-allow-origins=http://127.0.0.1:9229");
+    assert_eq!(command[4], "--force_high_performance_gpu");
+    assert_eq!(command[5], "--enable-features=UseOzonePlatform");
 }
 
 #[test]
@@ -439,6 +438,7 @@ fn launcher_native_menu_inspector_arguments_are_added_before_extra_args() {
         build_codex_arguments_with_native_menu_inspector(9229, 9329, &extra_args),
         vec![
             "--remote-debugging-port=9229".to_string(),
+            "--remote-debugging-address=127.0.0.1".to_string(),
             "--remote-allow-origins=http://127.0.0.1:9229".to_string(),
             "--inspect=127.0.0.1:9329".to_string(),
             "--force_high_performance_gpu".to_string(),
@@ -446,9 +446,10 @@ fn launcher_native_menu_inspector_arguments_are_added_before_extra_args() {
     );
     let command = build_codex_command_with_native_menu_inspector(&app_dir, 9229, 9329, &extra_args);
     assert_eq!(command[1], "--remote-debugging-port=9229");
-    assert_eq!(command[2], "--remote-allow-origins=http://127.0.0.1:9229");
-    assert_eq!(command[3], "--inspect=127.0.0.1:9329");
-    assert_eq!(command[4], "--force_high_performance_gpu");
+    assert_eq!(command[2], "--remote-debugging-address=127.0.0.1");
+    assert_eq!(command[3], "--remote-allow-origins=http://127.0.0.1:9229");
+    assert_eq!(command[4], "--inspect=127.0.0.1:9329");
+    assert_eq!(command[5], "--force_high_performance_gpu");
 }
 
 #[test]
@@ -465,7 +466,7 @@ fn launcher_constructs_windows_packaged_activation_without_real_app() {
         build_packaged_activation(&app_dir, 9229, &[]).unwrap(),
         CodexLaunch::PackagedActivation {
             app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
-            arguments: "--remote-debugging-port=9229 --remote-allow-origins=http://127.0.0.1:9229"
+            arguments: "--remote-debugging-port=9229 --remote-debugging-address=127.0.0.1 --remote-allow-origins=http://127.0.0.1:9229"
                 .to_string(),
             process_id: None,
         }
@@ -484,7 +485,7 @@ fn launcher_packaged_activation_appends_extra_codex_arguments() {
         CodexLaunch::PackagedActivation {
             app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
             arguments:
-                "--remote-debugging-port=9229 --remote-allow-origins=http://127.0.0.1:9229 --force_high_performance_gpu"
+                "--remote-debugging-port=9229 --remote-debugging-address=127.0.0.1 --remote-allow-origins=http://127.0.0.1:9229 --force_high_performance_gpu"
                     .to_string(),
             process_id: None,
         }
@@ -502,7 +503,7 @@ fn launcher_packaged_activation_adds_native_menu_inspector_argument() {
         CodexLaunch::PackagedActivation {
             app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
             arguments:
-                "--remote-debugging-port=9229 --remote-allow-origins=http://127.0.0.1:9229 --inspect=127.0.0.1:9329"
+                "--remote-debugging-port=9229 --remote-debugging-address=127.0.0.1 --remote-allow-origins=http://127.0.0.1:9229 --inspect=127.0.0.1:9329"
                     .to_string(),
             process_id: None,
         }
@@ -525,7 +526,7 @@ fn launcher_applies_codexplusplus_window_icon_after_packaged_activation() {
     let source = include_str!("../src/launcher.rs");
 
     assert!(source.contains("apply_codexplusplus_window_icon_after_launch(process_id);"));
-    assert!(source.contains("windows_apply_codexplusplus_icon_to_process_window"));
+    assert!(source.contains("windows_apply_codexplusplus_icon_to_process_tree"));
 }
 
 #[test]
@@ -602,6 +603,7 @@ fn launcher_macos_open_command_appends_extra_codex_arguments_after_args() {
         &command[args_index + 1..],
         &[
             "--remote-debugging-port=9229".to_string(),
+            "--remote-debugging-address=127.0.0.1".to_string(),
             "--remote-allow-origins=http://127.0.0.1:9229".to_string(),
             "--force_high_performance_gpu".to_string(),
         ]
@@ -625,6 +627,7 @@ fn launcher_macos_open_command_adds_native_menu_inspector_argument() {
         &command[args_index + 1..],
         &[
             "--remote-debugging-port=9229".to_string(),
+            "--remote-debugging-address=127.0.0.1".to_string(),
             "--remote-allow-origins=http://127.0.0.1:9229".to_string(),
             "--inspect=127.0.0.1:9329".to_string(),
         ]
@@ -639,10 +642,43 @@ fn ports_windows_falls_back_to_ephemeral_when_requested_is_busy() {
 }
 
 #[test]
-fn ports_windows_packaged_debug_falls_back_to_ephemeral_when_requested_is_busy() {
-    let selected = select_packaged_codex_debug_port_with(9229, true, |_| false, || 43001);
+fn ports_windows_packaged_debug_reuses_requested_when_cdp_is_already_listening() {
+    let selected =
+        select_packaged_codex_debug_port_with(9229, true, |_| false, |_| true, || 43001);
+
+    assert_eq!(selected, 9229);
+}
+
+#[test]
+fn ports_windows_packaged_debug_falls_back_when_busy_listener_is_not_cdp() {
+    let selected =
+        select_packaged_codex_debug_port_with(9229, true, |_| false, |_| false, || 43001);
 
     assert_eq!(selected, 43001);
+}
+
+#[test]
+fn ports_cdp_probe_requires_the_devtools_version_shape() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request);
+        let body = r#"{"Browser":"Chrome/145","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/test"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+    });
+
+    assert!(is_cdp_http_endpoint(port));
+    server.join().unwrap();
 }
 
 #[test]
@@ -671,6 +707,16 @@ async fn default_helper_serves_backend_status_over_http() {
     let payload: serde_json::Value = response.json().await.unwrap();
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["transport"], "http-helper");
+
+    let identity_response = client
+        .get(format!("http://127.0.0.1:{port}/identity/status"))
+        .send()
+        .await
+        .unwrap();
+    assert!(identity_response.status().is_success());
+    let identity: serde_json::Value = identity_response.json().await.unwrap();
+    assert_eq!(identity["status"], "ok");
+    assert!(identity["role"].as_str().is_some());
 
     let repair_response = client
         .post(format!("http://127.0.0.1:{port}/backend/repair"))

@@ -11,7 +11,9 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use url::Url;
 
+use crate::secret_store::resolve_member_access_token;
 use crate::settings::{BackendSettings, SettingsStore, normalize_codex_extra_args};
 use crate::status::{LaunchStatus, StatusStore};
 
@@ -62,6 +64,39 @@ impl CodexLaunch {
             Self::PackagedActivation { process_id, .. } => *process_id,
             Self::Process { .. } => None,
         }
+    }
+
+    pub fn debug_port(&self) -> Option<u16> {
+        match self {
+            Self::PackagedActivation { arguments, .. } => {
+                remote_debugging_port_from_arguments(arguments.split_whitespace())
+            }
+            Self::Process { command, .. } => {
+                remote_debugging_port_from_arguments(command.iter().map(String::as_str))
+            }
+        }
+    }
+}
+
+fn remote_debugging_port_from_arguments<'a>(
+    arguments: impl IntoIterator<Item = &'a str>,
+) -> Option<u16> {
+    arguments.into_iter().find_map(|argument| {
+        argument
+            .strip_prefix("--remote-debugging-port=")
+            .and_then(|value| value.parse::<u16>().ok())
+    })
+}
+
+fn next_codex_empty_streak(
+    current: u32,
+    cdp_endpoint_alive: bool,
+    codex_process_alive: bool,
+) -> u32 {
+    if cdp_endpoint_alive || codex_process_alive {
+        0
+    } else {
+        current.saturating_add(1)
     }
 }
 
@@ -329,6 +364,7 @@ where
                     debug_port,
                     helper_port,
                     &app_dir,
+                    launch.process_id(),
                 );
                 options.status_store.save_latest(&degraded)?;
                 hooks.write_status("running_degraded").await;
@@ -343,6 +379,7 @@ where
                 debug_port,
                 helper_port,
                 &app_dir,
+                launch.process_id(),
             );
             options.status_store.save_latest(&status)?;
             hooks.write_status("running").await;
@@ -372,7 +409,14 @@ where
                 }
             }
             let message = error.to_string();
-            let failure = launch_status("failed", &message, debug_port, helper_port, &app_dir);
+            let failure = launch_status(
+                "failed",
+                &message,
+                debug_port,
+                helper_port,
+                &app_dir,
+                launched.as_ref().and_then(CodexLaunch::process_id),
+            );
             let _ = status_store.save_latest(&failure);
             hooks.write_status("failed").await;
             Err(error)
@@ -409,11 +453,12 @@ fn start_native_menu_localizer(inspector_port: u16) {
 
 #[cfg(windows)]
 fn apply_codexplusplus_window_icon_after_launch(process_id: u32) {
-    let icon_resource_path =
-        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("codex-plus-plus.exe"));
+    let icon_resource_path = crate::identity_icon::active_icon_path()
+        .or_else(|| std::env::current_exe().ok())
+        .unwrap_or_else(|| PathBuf::from("codex-plus-plus.exe"));
     tokio::spawn(async move {
         for attempt in 1..=30 {
-            if crate::windows_apply_codexplusplus_icon_to_process_window(
+            if crate::windows_apply_codexplusplus_icon_to_process_tree(
                 process_id,
                 icon_resource_path.clone(),
             ) {
@@ -854,21 +899,25 @@ impl LaunchHooks for DefaultLaunchHooks {
                     let _ = child.wait().await;
                 }
             }
-            CodexLaunch::PackagedActivation { process_id, .. } => {
-                if let Some(process_id) = process_id {
-                    wait_for_windows_process_id(*process_id).await?;
-                }
-            }
+            // The PID returned by IApplicationActivationManager is an activation PID, not a
+            // reliable lifetime handle for the packaged Codex window. It may exit while the
+            // real ChatGPT.exe process and its DevTools endpoint continue running.
+            CodexLaunch::PackagedActivation { .. } => {}
         }
+        let debug_port = launch.debug_port();
         let mut empty_streak = 0u32;
         loop {
-            if crate::watcher::find_codex_processes().is_empty() {
-                empty_streak = empty_streak.saturating_add(1);
-                if empty_streak >= 3 {
-                    break;
-                }
-            } else {
-                empty_streak = 0;
+            let cdp_endpoint_alive = debug_port
+                .map(crate::ports::is_cdp_http_endpoint)
+                .unwrap_or(false);
+            let codex_process_alive = !crate::watcher::find_codex_processes().is_empty();
+            empty_streak = next_codex_empty_streak(
+                empty_streak,
+                cdp_endpoint_alive,
+                codex_process_alive,
+            );
+            if empty_streak >= 3 {
+                break;
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
@@ -998,6 +1047,29 @@ async fn handle_helper_connection(
             "application/json; charset=utf-8".to_string(),
             "helper.backend_status_ok",
         )
+    } else if path == "/identity/status" && matches!(method, "GET" | "POST" | "OPTIONS") {
+        (
+            "200 OK".to_string(),
+            serde_json::to_vec(&serde_json::json!({
+                "status": "ok",
+                "role": crate::identity_icon::active_role()
+            }))?,
+            "application/json; charset=utf-8".to_string(),
+            "helper.identity_status_ok",
+        )
+    } else if (path == "/theme/manifest" || path.starts_with("/theme/assets/"))
+        && matches!(method, "GET" | "OPTIONS")
+    {
+        if method == "OPTIONS" {
+            (
+                "200 OK".to_string(),
+                Vec::new(),
+                "application/json; charset=utf-8".to_string(),
+                "helper.theme_proxy_options",
+            )
+        } else {
+            theme_proxy_response(path).await
+        }
     } else if path == "/diagnostics/log" && matches!(method, "POST" | "OPTIONS") {
         if method == "POST" {
             let detail =
@@ -1118,9 +1190,107 @@ fn overlay_image_content_type(path: &Path) -> Option<&'static str> {
         Some("png") => Some("image/png"),
         Some("jpg") | Some("jpeg") => Some("image/jpeg"),
         Some("webp") => Some("image/webp"),
-        Some("gif") => Some("image/gif"),
-        Some("bmp") => Some("image/bmp"),
         _ => None,
+    }
+}
+
+fn is_safe_theme_asset_name(value: &str) -> bool {
+    let allowed_extension = value.ends_with(".png") || value.ends_with(".jpg") || value.ends_with(".jpeg") || value.ends_with(".webp");
+    !value.is_empty()
+        && value.len() <= 128
+        && allowed_extension
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn theme_proxy_upstream_url(settings: &BackendSettings, path: &str) -> Option<String> {
+    let mut base = Url::parse(settings.codex_app_visual_theme_service_url.trim()).ok()?;
+    if !matches!(base.scheme(), "http" | "https") {
+        return None;
+    }
+    base.set_query(None);
+    base.set_fragment(None);
+    let base_path = base.path().trim_end_matches('/');
+    base.set_path(&format!("{base_path}/"));
+    let route = if path == "/theme/manifest" {
+        "v1/themes/manifest".to_string()
+    } else {
+        let asset = path.strip_prefix("/theme/assets/")?;
+        if !is_safe_theme_asset_name(asset) {
+            return None;
+        }
+        format!("v1/themes/assets/{asset}")
+    };
+    base.join(&route).ok().map(|url| url.to_string())
+}
+
+async fn theme_proxy_response(path: &str) -> (String, Vec<u8>, String, &'static str) {
+    let failed = |status: &str, message: &str, event: &'static str| {
+        (
+            status.to_string(),
+            serde_json::to_vec(&serde_json::json!({ "status": "failed", "message": message })).unwrap_or_default(),
+            "application/json; charset=utf-8".to_string(),
+            event,
+        )
+    };
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let token = match resolve_member_access_token(&settings.codex_app_visual_theme_member_token) {
+        Ok(Some(token)) => token,
+        _ => return failed("401 Unauthorized", "Theme member session is unavailable", "helper.theme_proxy_unauthorized"),
+    };
+    let Some(url) = theme_proxy_upstream_url(&settings, path) else {
+        return failed("502 Bad Gateway", "Theme service address is invalid", "helper.theme_proxy_invalid_url");
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return failed("502 Bad Gateway", "Theme client is unavailable", "helper.theme_proxy_client_failed"),
+    };
+    let response = match client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return failed("502 Bad Gateway", "Theme service is unavailable", "helper.theme_proxy_unavailable"),
+    };
+    let status = response.status();
+    if status.as_u16() == 401 {
+        return failed("401 Unauthorized", "Theme authorization was rejected", "helper.theme_proxy_rejected");
+    }
+    if status.as_u16() == 403 {
+        return failed("403 Forbidden", "Theme is not granted to this member", "helper.theme_proxy_forbidden");
+    }
+    if status.as_u16() == 404 {
+        return failed("404 Not Found", "Theme resource was not found", "helper.theme_proxy_not_found");
+    }
+    if !status.is_success() {
+        return failed("502 Bad Gateway", "Theme service returned an invalid response", "helper.theme_proxy_failed");
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let is_manifest = path == "/theme/manifest";
+    if (is_manifest && !content_type.starts_with("application/json"))
+        || (!is_manifest && !content_type.starts_with("image/"))
+    {
+        return failed("502 Bad Gateway", "Theme service returned an unexpected content type", "helper.theme_proxy_content_type_failed");
+    }
+    match response.bytes().await {
+        Ok(bytes) => (
+            "200 OK".to_string(),
+            bytes.to_vec(),
+            content_type,
+            "helper.theme_proxy_ok",
+        ),
+        Err(_) => failed("502 Bad Gateway", "Theme resource could not be read", "helper.theme_proxy_read_failed"),
     }
 }
 
@@ -1495,6 +1665,8 @@ mod computer_use_tests {
             overlay_image_content_type(Path::new("overlay.webp")),
             Some("image/webp")
         );
+        assert_eq!(overlay_image_content_type(Path::new("overlay.gif")), None);
+        assert_eq!(overlay_image_content_type(Path::new("overlay.bmp")), None);
         assert_eq!(overlay_image_content_type(Path::new("overlay.txt")), None);
     }
 
@@ -1600,6 +1772,7 @@ fn sanitize_diagnostic_event(event: &str) -> String {
 pub fn build_codex_arguments(debug_port: u16, extra_args: &[String]) -> Vec<String> {
     let mut args = vec![
         format!("--remote-debugging-port={debug_port}"),
+        "--remote-debugging-address=127.0.0.1".to_string(),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
     ];
     args.extend(normalize_codex_extra_args(extra_args));
@@ -2055,41 +2228,10 @@ async fn run_post_launch_computer_use_guard(
 }
 
 #[cfg(windows)]
-async fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()> {
-    tokio::task::spawn_blocking(move || wait_for_windows_process_id_blocking(process_id))
-        .await
-        .context("Windows process wait task failed")?
-}
-
-#[cfg(windows)]
 async fn terminate_windows_process_id(process_id: u32) -> anyhow::Result<()> {
     tokio::task::spawn_blocking(move || terminate_windows_process_id_blocking(process_id))
         .await
         .context("Windows process termination task failed")?
-}
-
-#[cfg(windows)]
-fn wait_for_windows_process_id_blocking(process_id: u32) -> anyhow::Result<()> {
-    use windows::Win32::Foundation::{CloseHandle, WAIT_FAILED};
-    use windows::Win32::System::Threading::{
-        INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        WaitForSingleObject,
-    };
-
-    unsafe {
-        let handle = OpenProcess(
-            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-            false,
-            process_id,
-        )
-        .with_context(|| format!("failed to open Windows process id {process_id}"))?;
-        let wait_result = WaitForSingleObject(handle, INFINITE);
-        let _ = CloseHandle(handle);
-        if wait_result == WAIT_FAILED {
-            anyhow::bail!("failed to wait for Windows process id {process_id}");
-        }
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -2115,11 +2257,6 @@ fn terminate_windows_process_id_blocking(process_id: u32) -> anyhow::Result<()> 
 }
 
 #[cfg(not(windows))]
-async fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()> {
-    anyhow::bail!("cannot wait for Windows process id {process_id} on this platform")
-}
-
-#[cfg(not(windows))]
 async fn terminate_windows_process_id(process_id: u32) -> anyhow::Result<()> {
     anyhow::bail!("cannot terminate Windows process id {process_id} on this platform")
 }
@@ -2130,6 +2267,7 @@ fn launch_status(
     debug_port: u16,
     helper_port: u16,
     app_dir: &Path,
+    process_id: Option<u32>,
 ) -> LaunchStatus {
     LaunchStatus {
         status: status.to_string(),
@@ -2138,6 +2276,7 @@ fn launch_status(
         debug_port: Some(debug_port),
         helper_port: Some(helper_port),
         codex_app: Some(app_dir.to_string_lossy().to_string()),
+        process_id,
     }
 }
 
@@ -2245,6 +2384,46 @@ fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packaged_launch_recovers_debug_port_from_activation_arguments() {
+        let launch = CodexLaunch::PackagedActivation {
+            app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
+            arguments: "--remote-debugging-port=9229 --remote-debugging-address=127.0.0.1"
+                .to_string(),
+            process_id: Some(4242),
+        };
+
+        assert_eq!(launch.debug_port(), Some(9229));
+    }
+
+    #[test]
+    fn packaged_runtime_does_not_advance_empty_streak_while_cdp_is_alive() {
+        assert_eq!(next_codex_empty_streak(2, true, false), 0);
+        assert_eq!(next_codex_empty_streak(2, false, true), 0);
+        assert_eq!(next_codex_empty_streak(2, false, false), 3);
+    }
+
+    #[test]
+    fn theme_asset_route_rejects_path_traversal() {
+        assert!(is_safe_theme_asset_name("kitty-christmas.jpg"));
+        assert!(is_safe_theme_asset_name("shinchan-collage.png"));
+        assert!(!is_safe_theme_asset_name("../kitty-christmas.jpg"));
+        assert!(!is_safe_theme_asset_name("nested/kitty-christmas.jpg"));
+    }
+
+    #[test]
+    fn theme_proxy_url_does_not_depend_on_duplicate_theme_token_storage() {
+        let settings = BackendSettings {
+            codex_app_visual_theme_service_url: "http://themes.example.test".to_string(),
+            codex_app_visual_theme_member_token: String::new(),
+            ..BackendSettings::default()
+        };
+        assert_eq!(
+            theme_proxy_upstream_url(&settings, "/theme/manifest").as_deref(),
+            Some("http://themes.example.test/v1/themes/manifest")
+        );
+    }
 
     #[test]
     fn post_launch_guard_stops_after_stable_ready_artifacts() {

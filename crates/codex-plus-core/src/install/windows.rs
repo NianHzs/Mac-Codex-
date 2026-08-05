@@ -69,13 +69,13 @@ pub fn install_shortcuts(options: &InstallOptions) -> anyhow::Result<()> {
     create_entrypoint_shortcut(
         PathBuf::from(&plan.silent_shortcut),
         PathBuf::from(&plan.launcher_path),
-        "Launch Codework Codex++ silently",
+        "Launch ♛Codework AI客户端 silently",
         PathBuf::from(&plan.silent_icon_path),
     )?;
     create_entrypoint_shortcut(
         PathBuf::from(&plan.manager_shortcut),
         PathBuf::from(&plan.manager_path),
-        "Open Codework Codex++ management tool",
+        "Open ♛Codework AI客户端 management tool",
         PathBuf::from(&plan.manager_icon_path),
     )?;
     register_url_protocol(&plan.manager_path)?;
@@ -157,7 +157,7 @@ fn register_url_protocol(manager_path: &str) -> anyhow::Result<()> {
     crate::windows_integration::set_current_user_string_value(
         URL_PROTOCOL_SUBKEY,
         "",
-        "URL:Codework Codex++ Import Protocol",
+        "URL:♛Codework AI客户端 Import Protocol",
     )?;
     crate::windows_integration::set_current_user_string_value(
         URL_PROTOCOL_SUBKEY,

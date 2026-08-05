@@ -10,6 +10,8 @@ pub mod codex_local_storage;
 pub mod codex_sqlite;
 mod computer_use_guard;
 pub mod diagnostic_log;
+pub mod dream_skin;
+pub mod dream_skin_cdp;
 pub mod env_conflicts;
 pub mod http_client;
 pub mod identity_icon;
@@ -40,6 +42,7 @@ pub mod upstream_worktree;
 pub mod user_scripts;
 pub mod version;
 pub mod watcher;
+pub mod workbuddy;
 #[cfg(windows)]
 mod windows_integration;
 pub mod zed_remote;

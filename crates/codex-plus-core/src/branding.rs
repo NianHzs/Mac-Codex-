@@ -1,5 +1,5 @@
-pub const PRODUCT_NAME: &str = "Codework Codex++";
-pub const MANAGER_NAME: &str = "Codework Codex++ 管理工具";
+pub const PRODUCT_NAME: &str = "♛Codework AI客户端";
+pub const MANAGER_NAME: &str = "♛Codework AI客户端 管理工具";
 pub const LAUNCHER_BINARY: &str = "codework-codex-plus-plus";
 pub const MANAGER_BINARY: &str = "codework-codex-plus-plus-manager";
 pub const STATE_DIR: &str = ".codework-codex-plus-plus";

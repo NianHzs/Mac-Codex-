@@ -72,11 +72,11 @@ impl ShortcutState {
 }
 
 pub fn shortcut_names() -> (&'static str, &'static str) {
-    ("Codework Codex++.lnk", "Codework Codex++ 管理工具.lnk")
+    ("♛Codework AI客户端.lnk", "♛Codework AI客户端 管理工具.lnk")
 }
 
 pub fn app_bundle_names() -> (&'static str, &'static str) {
-    ("Codework Codex++.app", "Codework Codex++ 管理工具.app")
+    ("♛Codework AI客户端.app", "♛Codework AI客户端 管理工具.app")
 }
 
 pub fn inspect_entrypoints() -> EntryPointState {

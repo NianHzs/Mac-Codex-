@@ -11,6 +11,8 @@ pub struct LaunchStatus {
     pub debug_port: Option<u16>,
     pub helper_port: Option<u16>,
     pub codex_app: Option<String>,
+    #[serde(default)]
+    pub process_id: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +79,7 @@ mod tests {
             debug_port: Some(9222),
             helper_port: Some(4545),
             codex_app: Some("Codex".to_string()),
+            process_id: Some(123),
         };
 
         store.save_latest(&status).unwrap();

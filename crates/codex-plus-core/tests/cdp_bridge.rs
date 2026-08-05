@@ -77,15 +77,21 @@ fn injection_script_exposes_image_overlay_config() {
     assert!(script.contains("\"enabled\":true"));
     assert!(script.contains("\"opacity\":0.42"));
     assert!(script.contains("\"fitMode\":\"fill\""));
-    assert!(script.contains("\"dataUrl\":\"data:image/png;base64,"));
+    assert!(script.contains("\"contentType\":\"image/png\""));
+    assert!(script.contains("\"dataUrl\":\"\""));
     assert!(script.contains("http://127.0.0.1:57321/overlay/image"));
+    assert!(!script.contains("data:image/png;base64,"));
 }
 
 #[test]
-fn injection_script_installs_image_overlay_from_data_uri() {
+fn injection_script_installs_image_overlay_from_native_bridge_blob_url() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("const source = config.dataUrl || \"\""));
+    assert!(script.contains("__codexSessionDeleteBridge(\"/overlay/image-data\", {})"));
+    assert!(script.contains("const binary = atob("));
+    assert!(script.contains("new Blob([bytes], { type })"));
+    assert!(script.contains("URL.createObjectURL(blob)"));
+    assert!(!script.contains("fetch(config.imageUrl"));
     assert!(script.contains("backgroundImage: `url(\"${source.replace(/\"/g, \"%22\")}\")`"));
     assert!(script.contains(
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
@@ -277,7 +283,7 @@ fn injection_script_skips_plugin_patch_work_in_relay_mode() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("function pluginPatchDisabledInRelayMode()"));
-    assert!(script.contains("!codexPlusBackendSettingsLoaded"));
+    assert!(script.contains("codexPlusBackendSettingsLoaded && codexPlusBackendSettings.launchMode === \"relay\""));
     assert!(script.contains("if (pluginPatchDisabledInRelayMode()) return"));
     assert!(script.contains("clearPluginPatchArtifacts()"));
 }
@@ -373,7 +379,7 @@ fn injection_script_does_not_unlock_disabled_plugin_install_buttons() {
 fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"13\""));
     assert!(!script.contains("function pluginMarketplaceAliasForName"));
     assert!(
         !script.contains("if (name === \"openai-bundled\") return \"codex-plus-openai-bundled\"")
@@ -385,7 +391,7 @@ fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
 fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"13\""));
     assert!(script.contains("isCodexPluginBuildFlavorFilter"));
     assert!(script.contains("source.includes(\"!u(e.marketplaceName)||e.marketplaceName===r\")"));
     assert!(script.contains("source.includes(\"!t.includes(e.name)\")"));
@@ -397,7 +403,7 @@ fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
 fn injection_script_expands_api_key_plugin_marketplace_requests() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"13\""));
     assert!(script.contains("installPluginMarketplaceRequestPatch"));
     assert!(script.contains("installPluginMarketplaceBridgePatch"));
     assert!(script.contains("installPluginBuildFlavorFilterPatch"));
@@ -418,7 +424,8 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(script.contains("data?.type === \"fetch-response\""));
     assert!(script.contains("__codexPluginMarketplaceFetchRequestIds"));
     assert!(script.contains("const nextKinds = Array.isArray(next.marketplaceKinds)"));
-    assert!(script.contains("if (!nextKinds.includes(\"vertical\")) nextKinds.push(\"vertical\")"));
+    assert!(script.contains("if (codexPlusBackendSettings.launchMode === \"relay\")"));
+    assert!(script.contains("next.marketplaceKinds = [\"local\"]"));
     assert!(script.contains("next.marketplaceKinds = Array.from(new Set(nextKinds))"));
     assert!(script.contains("patchPluginMarketplaceResult"));
     assert!(script.contains("__CODEX_PLUS_PLUGIN_MARKETPLACES__"));
@@ -457,14 +464,13 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
 }
 
 #[test]
-fn injection_script_preserves_vertical_marketplace_kind_for_official_plugins() {
+fn injection_script_keeps_remote_marketplace_only_for_chatgpt_relay_mode() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("plugin_marketplace_request_expanded"));
-    assert!(script.contains("if (!nextKinds.includes(\"vertical\")) nextKinds.push(\"vertical\")"));
-    assert!(!script.contains("codexPluginAllowedMarketplaceKinds"));
-    assert!(!script.contains("codexPluginExpandedMarketplaceKinds"));
-    assert!(!script.contains("delete next.marketplaceKinds"));
+    assert!(script.contains("if (codexPlusBackendSettings.launchMode === \"relay\")"));
+    assert!(script.contains("next.marketplaceKinds = [\"local\"]"));
+    assert!(script.contains("nextKinds.push(\"vertical\")"));
 }
 
 #[test]

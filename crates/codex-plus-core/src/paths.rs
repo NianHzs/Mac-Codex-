@@ -37,6 +37,10 @@ pub fn default_pending_provider_import_path() -> PathBuf {
     default_app_state_dir().join(PENDING_PROVIDER_IMPORT_FILE)
 }
 
+pub fn default_dream_skin_dir() -> PathBuf {
+    default_app_state_dir().join("DreamSkin")
+}
+
 pub fn default_pending_client_update_path() -> PathBuf {
     default_app_state_dir().join(PENDING_CLIENT_UPDATE_FILE)
 }
@@ -97,6 +101,11 @@ mod tests {
         let path = default_pending_provider_import_path();
 
         assert!(path.ends_with(".codework-codex-plus-plus/pending-provider-import.json"));
+    }
+
+    #[test]
+    fn default_dream_skin_dir_uses_app_state_directory() {
+        assert!(default_dream_skin_dir().ends_with(".codework-codex-plus-plus/DreamSkin"));
     }
 
     #[test]
