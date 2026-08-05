@@ -1,6 +1,8 @@
 import assert from "node:assert";
 import { it } from "node:test";
 import {
+  applyVerifiedFriendProfiles,
+  canDeliverChatNudge,
   getFriendSearchFeedback,
   getLatestConversationScrollTop,
   getPrivateChatAttachmentValidation,
@@ -9,6 +11,15 @@ import {
   shouldNotifyIncomingMessage,
   toggleEmojiFavorite,
 } from "./private-chat-state.ts";
+
+it("keeps the server friend name instead of overwriting it with a stale local search cache", () => {
+  const friends = applyVerifiedFriendProfiles(
+    [{ userId: "677", username: "677", unreadCount: 0, status: "online", identityLabel: null, isDefaultContact: false }],
+    [{ userId: "677", username: "saleAdmin", display: "s*******n" }],
+  );
+
+  assert.equal(friends[0]?.username, "677");
+});
 
 it("explains when a registered friend search has no match", () => {
   assert.equal(getFriendSearchFeedback(null), "未找到该官方注册用户，请核对用户名或用户 ID。");
@@ -22,6 +33,13 @@ it("only alerts for newly arrived unread messages while online", () => {
   assert.equal(shouldNotifyIncomingMessage("online", 0, 1), true);
   assert.equal(shouldNotifyIncomingMessage("do_not_disturb", 0, 1), false);
   assert.equal(shouldNotifyIncomingMessage("online", 1, 1), false);
+});
+
+it("delivers a chat nudge only when the recipient is online", () => {
+  assert.equal(canDeliverChatNudge("online"), true);
+  assert.equal(canDeliverChatNudge("do_not_disturb"), false);
+  assert.equal(canDeliverChatNudge("offline"), false);
+  assert.equal(canDeliverChatNudge("invisible"), false);
 });
 
 it("opens a chat at the latest message instead of the top", () => {

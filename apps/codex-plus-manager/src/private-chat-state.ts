@@ -1,4 +1,19 @@
-import type { FriendSearchResult } from "./private-chat";
+import type { ChatFriend, FriendSearchResult } from "./private-chat";
+
+export function applyVerifiedFriendProfiles(
+  friends: ChatFriend[],
+  verifiedProfiles: FriendSearchResult[],
+) {
+  const profilesByUserId = new Map(
+    verifiedProfiles
+      .filter((profile) => profile.userId.trim() && profile.username.trim())
+      .map((profile) => [profile.userId, profile]),
+  );
+  return friends.map((friend) => {
+    const verified = profilesByUserId.get(friend.userId);
+    return !friend.username.trim() && verified ? { ...friend, username: verified.username } : friend;
+  });
+}
 
 export function getFriendSearchFeedback(result: FriendSearchResult | null) {
   return result
@@ -18,6 +33,10 @@ export function getPresenceUpdateFeedback(status: "online" | "offline" | "do_not
 
 export function shouldNotifyIncomingMessage(status: "online" | "offline" | "do_not_disturb" | "invisible", previousUnread: number, currentUnread: number) {
   return status === "online" && currentUnread > previousUnread;
+}
+
+export function canDeliverChatNudge(status: "online" | "offline" | "do_not_disturb" | "invisible") {
+  return status === "online";
 }
 
 export function toggleEmojiFavorite(current: string[], emoji: string, limit = 12) {

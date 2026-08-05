@@ -9,6 +9,7 @@ use base64::Engine;
 use codex_plus_core::install::SILENT_BINARY;
 use codex_plus_core::models::{DeleteResult, SessionRef};
 use codex_plus_core::script_market::{self, MarketScript, ScriptMarketManifest};
+use codex_plus_core::secret_store::resolve_member_access_token;
 use codex_plus_core::skill_market::{self, MarketSkill, SkillMarketManifest};
 use codex_plus_core::settings::{BackendSettings, RelayProfile, SettingsStore};
 use codex_plus_core::status::{LaunchStatus, StatusStore};
@@ -24,11 +25,16 @@ use crate::install::{self, InstallActionResult, InstallOptions};
 
 const LOTTERY_MEMBER_SERVICE_URL: &str = "http://115.190.199.191:20080";
 const CODEWORK_RELEASE_MANIFEST_URL: &str =
-    "http://115.190.199.191:20080/downloads/codework-ai-client-windows.json";
+    "http://115.190.199.191:20080/downloads/codework-ai-client-windows-v2.json";
 const CODEWORK_RELEASE_PROGRESS_EVENT: &str = "codework-release-progress";
 const CHATGPT_INSTALL_PROGRESS_EVENT: &str = "chatgpt-install-progress";
 const CHATGPT_STORE_PRODUCT_IDS: &[&str] = &["9PLM9XGG6VKS", "9NT1R1C2HH7J"];
 const PRIVATE_CHAT_ATTACHMENT_MAX_BYTES: usize = 30 * 1024 * 1024;
+const RESTRICTED_THEME_GRANT_IDS: &[&str] = &[
+    "hello-kitty-christmas",
+    "shinchan-energy",
+    "hello-kitty-cloud-dream",
+];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult<T>
@@ -55,6 +61,13 @@ struct CodeworkReleaseManifest {
     notes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingCodeworkUpdate {
+    target_version: String,
+    requested_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeworkReleasePayload {
@@ -63,6 +76,7 @@ pub struct CodeworkReleasePayload {
     pub latest_version: Option<String>,
     pub download_url: Option<String>,
     pub notes: Vec<String>,
+    pub pending_target_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -430,6 +444,194 @@ pub async fn client_profile(access_token: String) -> CommandResult<Value> {
     }
 }
 
+fn normalize_visual_theme_session_token(value: &str) -> Option<String> {
+    let token = value.trim();
+    if token.is_empty() {
+        Some(String::new())
+    } else if (16..=4096).contains(&token.len()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+fn visual_theme_manifest_url(settings: &BackendSettings) -> Option<String> {
+    let mut service_url = Url::parse(settings.codex_app_visual_theme_service_url.trim()).ok()?;
+    if !matches!(service_url.scheme(), "http" | "https") {
+        return None;
+    }
+    service_url.set_query(None);
+    service_url.set_fragment(None);
+    let base_path = service_url.path().trim_end_matches('/');
+    service_url.set_path(&format!("{base_path}/"));
+    service_url.join("v1/themes/manifest").ok().map(|url| url.to_string())
+}
+
+fn is_safe_visual_theme_asset_name(value: &str) -> bool {
+    let mut parts = value.rsplitn(2, '.');
+    let Some(extension) = parts.next() else { return false; };
+    let Some(stem) = parts.next() else { return false; };
+    matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp")
+        && !stem.is_empty()
+        && stem.len() <= 120
+        && stem.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn visual_theme_asset_url(settings: &BackendSettings, asset_name: &str) -> Option<String> {
+    if !is_safe_visual_theme_asset_name(asset_name) {
+        return None;
+    }
+    let mut service_url = Url::parse(settings.codex_app_visual_theme_service_url.trim()).ok()?;
+    if !matches!(service_url.scheme(), "http" | "https") {
+        return None;
+    }
+    service_url.set_query(None);
+    service_url.set_fragment(None);
+    let base_path = service_url.path().trim_end_matches('/');
+    service_url.set_path(&format!("{base_path}/"));
+    service_url.join(&format!("v1/themes/assets/{asset_name}")).ok().map(|url| url.to_string())
+}
+
+fn preserve_visual_theme_settings(
+    mut incoming: BackendSettings,
+    persisted: &BackendSettings,
+) -> BackendSettings {
+    incoming.codex_app_visual_theme_enabled = persisted.codex_app_visual_theme_enabled;
+    incoming.codex_app_visual_theme_id = persisted.codex_app_visual_theme_id.clone();
+    incoming.codex_app_visual_theme_service_url =
+        persisted.codex_app_visual_theme_service_url.clone();
+    incoming.codex_app_visual_theme_member_token =
+        persisted.codex_app_visual_theme_member_token.clone();
+    incoming
+}
+
+fn apply_visual_theme_settings(
+    mut settings: BackendSettings,
+    enabled: bool,
+    theme_id: &str,
+    service_url: &str,
+) -> BackendSettings {
+    settings.codex_app_visual_theme_enabled = enabled;
+    settings.codex_app_visual_theme_id = theme_id.trim().to_string();
+    settings.codex_app_visual_theme_service_url = service_url.trim().trim_end_matches('/').to_string();
+    settings
+}
+
+#[tauri::command]
+pub fn sync_visual_theme_member_session(access_token: String) -> CommandResult<Value> {
+    let Some(token) = normalize_visual_theme_session_token(&access_token) else {
+        return failed("Theme member session token is invalid", json!({}));
+    };
+    let mut settings = SettingsStore::default().load().unwrap_or_default();
+    settings.codex_app_visual_theme_member_token = token;
+    match SettingsStore::default().save(&settings) {
+        Ok(()) => ok("Theme member session synchronized", json!({})),
+        Err(error) => failed(&format!("Unable to synchronize theme member session: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub fn save_visual_theme_settings(
+    enabled: bool,
+    theme_id: String,
+    service_url: String,
+) -> CommandResult<SettingsPayload> {
+    let store = SettingsStore::default();
+    let current = store.load().unwrap_or_default();
+    let settings = apply_visual_theme_settings(current, enabled, &theme_id, &service_url);
+    log_manager_event(
+        "manager.visual_theme_settings.save",
+        json!({
+            "enabled": settings.codex_app_visual_theme_enabled,
+            "themeId": settings.codex_app_visual_theme_id,
+            "serviceUrl": settings.codex_app_visual_theme_service_url,
+        }),
+    );
+    match store.save(&settings) {
+        Ok(()) => settings_payload("视觉主题设置已保存。", "视觉主题保存后重新读取失败"),
+        Err(error) => failed(
+            &format!("保存视觉主题设置失败：{error}"),
+            SettingsPayload {
+                settings,
+                settings_path: codex_plus_core::paths::default_settings_path()
+                    .to_string_lossy()
+                    .to_string(),
+                user_scripts: user_script_inventory(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn load_visual_theme_manifest() -> CommandResult<Value> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let Some(url) = visual_theme_manifest_url(&settings) else {
+        return failed("Theme service address is invalid", json!({}));
+    };
+    let token = match resolve_member_access_token(&settings.codex_app_visual_theme_member_token) {
+        Ok(Some(token)) => token,
+        _ => return failed("Theme member session is unavailable", json!({})),
+    };
+    let response = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => match client.get(url).bearer_auth(&token).send().await {
+            Ok(response) => response,
+            Err(error) => return failed(&format!("Theme service is unavailable: {error}"), json!({})),
+        },
+        Err(error) => return failed(&format!("Theme client is unavailable: {error}"), json!({})),
+    };
+    if !response.status().is_success() {
+        return failed(&format!("Theme service returned HTTP {}", response.status().as_u16()), json!({}));
+    }
+    match response.json::<Value>().await {
+        Ok(manifest) => ok("Theme manifest loaded", manifest),
+        Err(error) => failed(&format!("Theme manifest is invalid: {error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn load_visual_theme_asset(asset_name: String) -> CommandResult<Value> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let Some(url) = visual_theme_asset_url(&settings, asset_name.trim()) else {
+        return failed("Theme asset name is invalid", json!({}));
+    };
+    let token = match resolve_member_access_token(&settings.codex_app_visual_theme_member_token) {
+        Ok(Some(token)) => token,
+        _ => return failed("Theme member session is unavailable", json!({})),
+    };
+    let response = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => match client.get(url).bearer_auth(&token).send().await {
+            Ok(response) => response,
+            Err(error) => return failed(&format!("Theme asset is unavailable: {error}"), json!({})),
+        },
+        Err(error) => return failed(&format!("Theme client is unavailable: {error}"), json!({})),
+    };
+    if !response.status().is_success() {
+        return failed(&format!("Theme service returned HTTP {}", response.status().as_u16()), json!({}));
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(content_type.as_str(), "image/jpeg" | "image/png" | "image/webp") {
+        return failed("Theme asset content type is invalid", json!({}));
+    }
+    let bytes = match response.bytes().await {
+        Ok(bytes) if !bytes.is_empty() && bytes.len() <= 8 * 1024 * 1024 => bytes,
+        Ok(_) => return failed("Theme asset size is invalid", json!({})),
+        Err(error) => return failed(&format!("Theme asset cannot be read: {error}"), json!({})),
+    };
+    let data_uri = format!("data:{content_type};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+    ok("Theme asset loaded", json!({ "dataUri": data_uri }))
+}
+
 #[tauri::command]
 pub async fn update_client_active_role(access_token: String, active_role: String) -> CommandResult<Value> {
     match fetch_client_community(&access_token, reqwest::Method::PUT, "/api/client/identity/active-role", Some(json!({ "activeRole": active_role }))).await {
@@ -578,6 +780,61 @@ pub async fn search_registered_friend(access_token: String, query: String) -> Co
         Ok(payload) => ok("Friend search completed", payload),
         Err(error) => failed(&format!("Unable to search friend: {error}"), json!({ "result": null })),
     }
+}
+
+#[tauri::command]
+pub async fn search_theme_grant_member(access_token: String, query: String) -> CommandResult<Value> {
+    let query = query.trim();
+    if query.is_empty() {
+        return failed("请输入官方账号用户名或用户 ID", json!({ "member": null }));
+    }
+    let path = theme_grant_search_path(query);
+    match fetch_client_community(&access_token, reqwest::Method::GET, &path, None).await {
+        Ok(payload) => ok("主题授权账号查询完成", payload),
+        Err(error) => failed(&format!("查询主题授权账号失败：{error}"), json!({ "member": null })),
+    }
+}
+
+#[tauri::command]
+pub async fn save_theme_grants(
+    access_token: String,
+    user_id: String,
+    theme_ids: Vec<String>,
+) -> CommandResult<Value> {
+    let user_id = user_id.trim();
+    if user_id.is_empty() {
+        return failed("缺少要授权的用户 ID", json!({}));
+    }
+    if !theme_grant_ids_are_valid(&theme_ids) {
+        return failed("主题授权包含无效或重复的主题", json!({}));
+    }
+    let path = theme_grant_member_path(user_id);
+    match fetch_client_community(
+        &access_token,
+        reqwest::Method::PUT,
+        &path,
+        Some(json!({ "themeIds": theme_ids })),
+    )
+    .await
+    {
+        Ok(payload) => ok("主题授权已保存", payload),
+        Err(error) => failed(&format!("保存主题授权失败：{error}"), json!({})),
+    }
+}
+
+fn theme_grant_ids_are_valid(theme_ids: &[String]) -> bool {
+    let mut unique = std::collections::BTreeSet::new();
+    theme_ids.iter().all(|id| {
+        RESTRICTED_THEME_GRANT_IDS.contains(&id.as_str()) && unique.insert(id.as_str())
+    })
+}
+
+fn theme_grant_search_path(query: &str) -> String {
+    format!("/api/client/theme-grants/search?query={}", urlencoding::encode(query.trim()))
+}
+
+fn theme_grant_member_path(user_id: &str) -> String {
+    format!("/api/client/theme-grants/{}", urlencoding::encode(user_id.trim()))
 }
 
 #[tauri::command]
@@ -937,6 +1194,7 @@ pub fn backend_version() -> CommandResult<VersionPayload> {
 
 pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
     let current_version = codex_plus_core::version::DISPLAY_VERSION.to_string();
+    let pending_target_version = reconcile_pending_codework_update();
     match fetch_codework_release_manifest().await {
         Ok(manifest) => {
             let available = compare_release_versions(&manifest.version, &current_version)
@@ -950,6 +1208,7 @@ pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
                     latest_version: Some(manifest.version),
                     download_url: Some(manifest.download_url),
                     notes: manifest.notes,
+                    pending_target_version,
                 },
             )
         }
@@ -961,6 +1220,7 @@ pub async fn check_codework_release() -> CommandResult<CodeworkReleasePayload> {
                 latest_version: None,
                 download_url: None,
                 notes: Vec::new(),
+                pending_target_version,
             },
         ),
     }
@@ -970,6 +1230,7 @@ pub async fn install_codework_release(
     app: tauri::AppHandle,
 ) -> CommandResult<CodeworkReleasePayload> {
     let current_version = codex_plus_core::version::DISPLAY_VERSION.to_string();
+    let pending_target_version = reconcile_pending_codework_update();
     let manifest = match fetch_codework_release_manifest().await {
         Ok(manifest) => manifest,
         Err(error) => return failed(
@@ -989,6 +1250,7 @@ pub async fn install_codework_release(
                 latest_version: Some(manifest.version),
                 download_url: Some(manifest.download_url),
                 notes: manifest.notes,
+                pending_target_version,
             },
         );
     }
@@ -999,6 +1261,7 @@ pub async fn install_codework_release(
         latest_version: Some(manifest.version.clone()),
         download_url: Some(manifest.download_url.clone()),
         notes: manifest.notes.clone(),
+        pending_target_version: Some(manifest.version.clone()),
     };
     let _ = app.emit(
         CODEWORK_RELEASE_PROGRESS_EVENT,
@@ -1006,10 +1269,11 @@ pub async fn install_codework_release(
     );
 
     match download_codework_release(&app, &manifest.download_url).await {
-        Ok(installer_path) => match std::process::Command::new(&installer_path)
-            .args(codework_release_installer_args())
-            .spawn()
-        {
+        Ok(installer_path) => {
+            if let Err(error) = save_pending_codework_update(&manifest.version) {
+                return failed(&format!("无法记录待确认的更新：{error}"), payload);
+            }
+            match launch_codework_release_after_current_process_exits(&installer_path) {
             Ok(_) => {
                 let _ = app.emit(
                     CODEWORK_RELEASE_PROGRESS_EVENT,
@@ -1020,17 +1284,82 @@ pub async fn install_codework_release(
                     json!({ "stage": "closing", "downloadedBytes": 0_u64, "percent": 100_u64 }),
                 );
                 std::thread::sleep(std::time::Duration::from_millis(650));
-                app.exit(0);
+                crate::exit_manager_for_update(app);
                 ok("更新安装包已启动，客户端将自动覆盖安装并重新启动。", payload)
             }
-            Err(error) => failed(&format!("无法启动更新安装包：{error}"), payload),
+            Err(error) => {
+                let _ = clear_pending_codework_update();
+                failed(&format!("无法启动更新安装包：{error}"), payload)
+            }
+        }
         },
         Err(error) => failed(&format!("下载更新失败：{error}"), payload),
     }
 }
 
+fn pending_update_completed(target_version: &str, started_version: &str) -> bool {
+    target_version.trim() == started_version.trim()
+}
+
+fn pending_codework_update_path() -> PathBuf {
+    codex_plus_core::paths::default_pending_client_update_path()
+}
+
+fn save_pending_codework_update(target_version: &str) -> anyhow::Result<()> {
+    let path = pending_codework_update_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let update = PendingCodeworkUpdate {
+        target_version: target_version.trim().to_string(),
+        requested_at_ms: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
+    };
+    fs::write(path, format!("{}\n", serde_json::to_string_pretty(&update)?))?;
+    Ok(())
+}
+
+fn clear_pending_codework_update() -> anyhow::Result<()> {
+    match fs::remove_file(pending_codework_update_path()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn reconcile_pending_codework_update() -> Option<String> {
+    let path = pending_codework_update_path();
+    let contents = fs::read_to_string(&path).ok()?;
+    let pending: PendingCodeworkUpdate = serde_json::from_str(&contents).ok()?;
+    if pending_update_completed(&pending.target_version, codex_plus_core::version::DISPLAY_VERSION) {
+        let _ = clear_pending_codework_update();
+        return None;
+    }
+    Some(pending.target_version)
+}
+
 fn codework_release_installer_args() -> [&'static str; 2] {
     ["/S", "/UPDATE"]
+}
+
+fn launch_codework_release_after_current_process_exits(installer_path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        return std::process::Command::new(installer_path)
+            .args(codework_release_installer_args())
+            .creation_flags(codex_plus_core::windows_create_no_window())
+            .spawn()
+            .map(|_| ());
+    }
+
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new(installer_path)
+            .args(codework_release_installer_args())
+            .spawn()
+            .map(|_| ())
+    }
 }
 
 fn empty_codework_release_payload(current_version: String) -> CodeworkReleasePayload {
@@ -1040,6 +1369,7 @@ fn empty_codework_release_payload(current_version: String) -> CodeworkReleasePay
         latest_version: None,
         download_url: None,
         notes: Vec::new(),
+        pending_target_version: reconcile_pending_codework_update(),
     }
 }
 
@@ -1371,8 +1701,17 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
-    let settings = normalize_settings_before_save(settings);
-    match SettingsStore::default().save(&settings) {
+    let store = SettingsStore::default();
+    let persisted = store.load().unwrap_or_default();
+    let settings = normalize_settings_before_save(preserve_visual_theme_settings(settings, &persisted));
+    log_manager_event(
+        "manager.settings.save",
+        json!({
+            "preservedVisualThemeEnabled": settings.codex_app_visual_theme_enabled,
+            "preservedVisualThemeId": settings.codex_app_visual_theme_id,
+        }),
+    );
+    match store.save(&settings) {
         Ok(()) => settings_payload("设置已保存。", "设置保存后重新读取失败"),
         Err(error) => failed(
             &format!("保存设置失败：{error}"),
@@ -4060,7 +4399,7 @@ fn diagnostics_report() -> String {
         "generatedAtMs": generated_at_ms,
         "version": codex_plus_core::version::VERSION,
         "overview": overview.payload,
-        "settings": settings,
+        "settings": diagnostic_settings_summary(&settings),
         "logs": {
             "diagnosticLogPath": codex_plus_core::paths::default_diagnostic_log_path(),
             "latestStatusPath": codex_plus_core::paths::default_latest_status_path()
@@ -4071,6 +4410,29 @@ fn diagnostics_report() -> String {
         }
     }))
     .unwrap_or_else(|error| format!("诊断报告序列化失败：{error}"))
+}
+
+fn diagnostic_settings_summary(settings: &BackendSettings) -> Value {
+    let active_relay_configured = settings.relay_profiles.iter().any(|profile| {
+        profile.id == settings.active_relay_id
+            && (!profile.api_key.trim().is_empty()
+                || !profile.auth_contents.trim().is_empty()
+                || !profile.config_contents.trim().is_empty())
+    });
+    json!({
+        "relayProfilesEnabled": settings.relay_profiles_enabled,
+        "relayProfileCount": settings.relay_profiles.len(),
+        "activeRelayConfigured": active_relay_configured,
+        "providerSyncEnabled": settings.provider_sync_enabled,
+        "enhancementsEnabled": settings.enhancements_enabled,
+        "computerUseGuardEnabled": settings.computer_use_guard_enabled,
+        "visualTheme": {
+            "enabled": settings.codex_app_visual_theme_enabled,
+            "selectedTheme": settings.codex_app_visual_theme_id,
+            "customWallpaperConfigured": settings.codex_app_image_overlay_enabled
+                && !settings.codex_app_image_overlay_path.trim().is_empty()
+        }
+    })
 }
 
 fn load_overview_payload() -> (
@@ -4169,6 +4531,140 @@ fn default_log_lines() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_grant_ids_allow_only_the_shipped_restricted_themes() {
+        assert!(theme_grant_ids_are_valid(&[
+            "hello-kitty-christmas".to_string(),
+            "shinchan-energy".to_string(),
+        ]));
+        assert!(theme_grant_ids_are_valid(&[]));
+        assert!(!theme_grant_ids_are_valid(&["unknown-theme".to_string()]));
+        assert!(!theme_grant_ids_are_valid(&["shinchan-energy".to_string(), "shinchan-energy".to_string()]));
+    }
+
+    #[test]
+    fn theme_grant_paths_escape_member_ids_and_search_queries() {
+        assert_eq!(theme_grant_search_path("hello kitty&member"), "/api/client/theme-grants/search?query=hello%20kitty%26member");
+        assert_eq!(theme_grant_member_path("member/609"), "/api/client/theme-grants/member%2F609");
+    }
+
+    #[test]
+    fn visual_theme_session_token_trims_valid_values_and_rejects_short_values() {
+        assert_eq!(normalize_visual_theme_session_token("  member-theme-token-1234  "), Some("member-theme-token-1234".to_string()));
+        assert_eq!(normalize_visual_theme_session_token("short"), None);
+        assert_eq!(normalize_visual_theme_session_token(""), Some(String::new()));
+    }
+
+    #[test]
+    fn visual_theme_manifest_url_uses_the_configured_service_root() {
+        let settings = BackendSettings {
+            codex_app_visual_theme_service_url: "http://themes.example.test/base/".to_string(),
+            ..BackendSettings::default()
+        };
+        assert_eq!(
+            visual_theme_manifest_url(&settings).as_deref(),
+            Some("http://themes.example.test/base/v1/themes/manifest")
+        );
+    }
+
+    #[test]
+    fn visual_theme_asset_url_accepts_only_a_safe_asset_name() {
+        let settings = BackendSettings {
+            codex_app_visual_theme_service_url: "http://themes.example.test/base".to_string(),
+            ..BackendSettings::default()
+        };
+
+        assert_eq!(
+            visual_theme_asset_url(&settings, "kitty-christmas-thumb.jpg").as_deref(),
+            Some("http://themes.example.test/base/v1/themes/assets/kitty-christmas-thumb.jpg")
+        );
+        assert!(visual_theme_asset_url(&settings, "../settings.json").is_none());
+        assert!(visual_theme_asset_url(&settings, "nested/file.png").is_none());
+    }
+
+    #[test]
+    fn ordinary_settings_save_preserves_the_persisted_visual_theme_selection() {
+        let persisted = BackendSettings {
+            codex_app_visual_theme_enabled: true,
+            codex_app_visual_theme_id: "hello-kitty-christmas".to_string(),
+            codex_app_visual_theme_service_url: "http://themes.example.test".to_string(),
+            codex_app_visual_theme_member_token: "member-theme-token-1234".to_string(),
+            ..BackendSettings::default()
+        };
+        let stale_form = BackendSettings {
+            codex_app_visual_theme_enabled: false,
+            codex_app_visual_theme_id: "cyber-neon".to_string(),
+            codex_app_visual_theme_service_url: "http://stale.example.test".to_string(),
+            codex_app_visual_theme_member_token: String::new(),
+            relay_test_model: "gpt-5.6-sol".to_string(),
+            ..BackendSettings::default()
+        };
+
+        let merged = preserve_visual_theme_settings(stale_form, &persisted);
+
+        assert!(merged.codex_app_visual_theme_enabled);
+        assert_eq!(merged.codex_app_visual_theme_id, "hello-kitty-christmas");
+        assert_eq!(merged.codex_app_visual_theme_service_url, "http://themes.example.test");
+        assert_eq!(merged.codex_app_visual_theme_member_token, "member-theme-token-1234");
+        assert_eq!(merged.relay_test_model, "gpt-5.6-sol");
+    }
+
+    #[test]
+    fn visual_theme_update_changes_only_visual_theme_fields() {
+        let persisted = BackendSettings {
+            relay_api_key: "keep-secret".to_string(),
+            relay_test_model: "gpt-5.6-terra".to_string(),
+            codex_app_visual_theme_member_token: "member-theme-token-1234".to_string(),
+            ..BackendSettings::default()
+        };
+
+        let updated = apply_visual_theme_settings(
+            persisted,
+            true,
+            "crayon-shinchan",
+            "http://themes.example.test/",
+        );
+
+        assert!(updated.codex_app_visual_theme_enabled);
+        assert_eq!(updated.codex_app_visual_theme_id, "crayon-shinchan");
+        assert_eq!(updated.codex_app_visual_theme_service_url, "http://themes.example.test");
+        assert_eq!(updated.codex_app_visual_theme_member_token, "member-theme-token-1234");
+        assert_eq!(updated.relay_api_key, "keep-secret");
+        assert_eq!(updated.relay_test_model, "gpt-5.6-terra");
+    }
+
+    #[test]
+    fn diagnostic_settings_summary_never_exposes_credentials_or_configuration_text() {
+        let settings = BackendSettings {
+            relay_api_key: "sk-client-secret".to_string(),
+            codex_app_visual_theme_member_token: "member-theme-secret".to_string(),
+            codex_app_stepwise_api_key: "stepwise-secret".to_string(),
+            relay_common_config_contents: "password = secret".to_string(),
+            relay_profiles: vec![RelayProfile {
+                api_key: "sk-profile-secret".to_string(),
+                auth_contents: r#"{\"access_token\":\"official-secret\"}"#.to_string(),
+                config_contents: "api_key = secret".to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let summary = diagnostic_settings_summary(&settings).to_string();
+
+        for secret in [
+            "sk-client-secret",
+            "member-theme-secret",
+            "stepwise-secret",
+            "sk-profile-secret",
+            "official-secret",
+            "password = secret",
+            "api_key = secret",
+        ] {
+            assert!(!summary.contains(secret), "diagnostic summary leaked {secret}");
+        }
+        assert!(summary.contains("relayProfileCount"));
+    }
 
     #[test]
     fn backend_version_returns_structured_payload() {
@@ -4349,6 +4845,7 @@ mod tests {
 
     #[test]
     fn env_conflict_commands_ignore_codex_home_and_remove_openai_vars() {
+        let _codex_home_guard = codex_home_guard();
         let test_openai_name = "OPENAI_CODEX_PLUS_ENV_CONFLICT_TEST";
         let previous_openai = std::env::var_os(test_openai_name);
         let previous_codex_home = std::env::var_os("CODEX_HOME");
@@ -4400,6 +4897,7 @@ mod tests {
 
     #[test]
     fn delete_local_session_falls_back_when_requested_db_no_longer_contains_thread() {
+        let _codex_home_guard = codex_home_guard();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -4466,6 +4964,7 @@ mod tests {
 
     #[test]
     fn list_local_sessions_deduplicates_threads_across_current_and_legacy_dbs() {
+        let _codex_home_guard = codex_home_guard();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -4494,6 +4993,7 @@ mod tests {
 
     #[test]
     fn delete_local_session_removes_duplicate_threads_from_all_candidate_dbs() {
+        let _codex_home_guard = codex_home_guard();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -4549,6 +5049,21 @@ mod tests {
                 std::env::remove_var("CODEX_HOME");
             }
         }
+    }
+
+    /// `CODEX_HOME` 是进程级环境变量，多个测试并行改它会互相串扰：
+    /// A 测试刚 set_var 指向自己的 tempdir，B 测试立刻把它改成另一个 tempdir，
+    /// A 读到的就是 B 的目录，断言随机失败（单独跑却总是通过）。
+    /// 所有触碰该变量的测试都先取这把锁，保证同一时刻只有一个在跑。
+    fn codex_home_guard() -> std::sync::MutexGuard<'static, ()> {
+        static CODEX_HOME_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
+        // 前一个测试 panic 会让锁中毒，但这里守护的只是「排队」语义、没有共享状态，
+        // 直接取回内部值继续用即可，不必让后续测试连带失败。
+        CODEX_HOME_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[test]
@@ -4924,7 +5439,11 @@ model_reasoning_effort = "high"
     }
 
     #[test]
-    fn codework_release_update_uses_silent_installer_arguments() {
-        assert_eq!(codework_release_installer_args(), ["/S", "/UPDATE"]);
+    fn update_install_script_checks_both_executables_before_copying() {
+        let script = include_str!("../../../../scripts/installer/windows/CodeworkCodexPlusPlus.nsi");
+
+        assert!(script.contains("codework-codex-plus-plus.exe"));
+        assert!(script.contains("codework-codex-plus-plus-manager.exe"));
+        assert!(!script.contains("Goto manager_checked"));
     }
 }

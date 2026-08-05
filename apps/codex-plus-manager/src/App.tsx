@@ -25,14 +25,18 @@ import {
   getCodeworkUpdateSteps,
 } from "./release";
 import { PrivateChat, type ChatFriend, type ChatMessage, type IncomingFriendRequest, type OutgoingFriendRequest, type FriendSearchResult, type PresenceStatus } from "./private-chat";
-import { getPresenceUpdateFeedback, shouldNotifyIncomingMessage } from "./private-chat-state";
+import { applyVerifiedFriendProfiles, getPresenceUpdateFeedback, shouldNotifyIncomingMessage } from "./private-chat-state";
+import { CLIENT_SKIN_STORAGE_KEY, clientSkinVariables, readInitialClientSkin } from "./client-skin";
 import { isAnnouncementUnread, normalizeAnnouncementFeed, type AnnouncementFeed, type ClientAnnouncement } from "./announcement";
 import { getCommunityDeleteConfirmation } from "./community-state";
 import { skillActionLabel, skillUsageGuideRows, type SkillUsageGuide } from "./skill-market";
+import { domesticRelayGroupLabel, domesticRelayTokens, formatRelayQuota, groupRelayModels, relayTokenCanApply, relayTokenStatus, walletBalanceDisplay, type RelayTokenView } from "./relay-token-state";
 import {
   ArrowLeft,
   Bell,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Crown,
   Download,
@@ -56,6 +60,7 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   ShieldAlert,
@@ -108,14 +113,47 @@ import {
   type MemberProfile,
   type MemberRole,
 } from "./member";
+import { isAppliedVisualTheme, isThemeManifest, themePreviewAssetCandidates, themesVisibleToMember, type VisualThemeItem, type VisualThemeManifest } from "./visual-theme-contract";
+import { buildThemeFeedback } from "./theme-feedback";
+import { createCustomDreamSkin } from "./custom-dream-skin";
+import { runVisualThemeTransition } from "./visual-theme-transition";
+import { groupNavigationItems, navigationGroupExpanded, toggleNavigationGroup, type NavigationGroupId } from "./navigation-groups";
+import { buildNotificationSummary } from "./notification-summary";
+import {
+  canSaveThemeGrant,
+  normalizeThemeGrantIds,
+  restrictedThemeOptions,
+  type ThemeGrantMember,
+} from "./theme-grant-admin";
 
 type Status = "ok" | "failed" | "not_implemented" | "not_checked" | string;
 const ANNOUNCEMENT_READ_STORAGE_KEY = "codework-announcement-read-revisions";
+const VERIFIED_FRIEND_PROFILE_STORAGE_KEY = "codework-verified-friend-profiles";
+
+function readVerifiedFriendProfiles(): FriendSearchResult[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(VERIFIED_FRIEND_PROFILE_STORAGE_KEY) || "[]");
+    return Array.isArray(value)
+      ? value.filter((item): item is FriendSearchResult => typeof item?.userId === "string" && typeof item?.username === "string" && typeof item?.display === "string").slice(-200)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 type CommandResult<T> = T & {
   status: Status;
   message: string;
 };
+
+type ThemeGrantMemberRecord = ThemeGrantMember & { themeIds: string[] };
+
+type DreamSkinStatusResult = CommandResult<{
+  dreamSkinState: "pending" | "active" | "failed" | string;
+  restartRequired: boolean;
+  themeId: string | null;
+  runtimeMessage: string | null;
+}>;
 
 type PathState = {
   status: string;
@@ -165,6 +203,8 @@ type CodeworkReleaseResult = CommandResult<{
   minimumSupportedVersion: string | null;
   rollbackAvailable: boolean;
   lastFailure: string | null;
+  updateState: "idle" | "pending_confirmation" | string;
+  recoveryAction: boolean;
 }>;
 
 type ChatGptInstallResult = CommandResult<{
@@ -225,6 +265,13 @@ type MemberProfileResult = CommandResult<MemberProfile>;
 type MemberLoginResult = CommandResult<{
   accessToken: string;
   profile: MemberProfile;
+}>;
+
+type MemberSessionResult = CommandResult<{
+  accessToken: string;
+  username: string;
+  password: string;
+  rememberPassword: boolean;
 }>;
 
 type MemberActivityResult = CommandResult<MemberActivity>;
@@ -677,6 +724,54 @@ type SkillMarketResult = CommandResult<{
   };
 }>;
 
+type RelayTokenMetadata = RelayTokenView & {
+  name: string;
+  usedQuota: number;
+  group: string;
+  maskedKey: string;
+  models: string[];
+};
+
+type RelayTokenSyncResult = CommandResult<{
+  accountId: string;
+  tokens: RelayTokenMetadata[];
+  summary: {
+    refreshedAtMs: number;
+    totalCount: number;
+    usableCount: number;
+  };
+  wallet?: {
+    display: string;
+    refreshedAtMs: number;
+  } | null;
+}>;
+
+type RelayTokenApplyResult = CommandResult<{
+  profileId: string;
+  configPath: string;
+  backupPath: string | null;
+  configured: boolean;
+}>;
+
+type RelayTokenConnectionResult = CommandResult<{
+  latencyMs: number;
+  statusCode: number;
+}>;
+
+type WorkbuddyConfigResult = CommandResult<{
+  syncedModels: string[];
+  added: string[];
+  updated: string[];
+  unchanged: string[];
+  configPath: string;
+  backupPath: string | null;
+  installed: boolean;
+  launched: boolean;
+  executablePath: string | null;
+  downloadUrl: string | null;
+  launchMessage: string | null;
+}>;
+
 function providerSyncProgressMessage(result: CommandResult<ProviderSyncPayload>): string {
   const changed = result.changedSessionFiles ?? 0;
   const rows = result.sqliteRowsUpdated ?? 0;
@@ -702,36 +797,11 @@ function providerSyncTargetLabel(target: ProviderSyncTargetOption): string {
 type Route = "overview" | "account" | "activity" | "community" | "announcements" | "announcementManagement" | "updates" | "downloadChatGpt" | "relay" | "sessions" | "context" | "enhance" | "visualTheme" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
-type VisualThemeTokens = {
-  background: string;
-  surface: string;
-  accent: string;
-  border: string;
-  text: string;
-  radius: number;
-  fontScale: number;
-};
-
-type VisualThemeItem = {
-  id: string;
-  name: string;
-  detail?: string;
-  tier: "pro";
-  version: string;
-  tokens: VisualThemeTokens;
-};
-
-type VisualThemeManifest = {
-  version: string;
-  updatedAt?: string;
-  themes: VisualThemeItem[];
-};
-
 type VisualThemeManifestCache = Record<string, VisualThemeManifest>;
 
 const VISUAL_THEME_CACHE_KEY = "codework-theme-manifest-cache";
 const visualThemeTokenKeys = ["background", "surface", "accent", "border", "text", "radius", "fontScale"] as const;
-const visualThemeItemKeys = ["id", "name", "detail", "tier", "version", "tokens"] as const;
+const visualThemeItemKeys = ["id", "name", "detail", "tier", "version", "access", "cssProfile", "previewAsset", "heroAsset", "art", "tokens"] as const;
 const visualThemeManifestKeys = ["version", "updatedAt", "themes"] as const;
 
 const builtInVisualThemes: VisualThemeItem[] = [
@@ -771,6 +841,7 @@ function isSafeThemeVersion(value: unknown): value is string {
 }
 
 function isSafeThemeManifest(value: unknown): value is VisualThemeManifest {
+  if (isThemeManifest(value)) return true;
   if (!isPlainObject(value) || !hasOnlyKeys(value, visualThemeManifestKeys)) return false;
   if (!isSafeThemeVersion(value.version) || !Array.isArray(value.themes)) return false;
   if (value.updatedAt !== undefined && !isSafeThemeText(value.updatedAt)) return false;
@@ -781,6 +852,17 @@ function isSafeThemeManifest(value: unknown): value is VisualThemeManifest {
     if (!isSafeThemeText(theme.name)) return false;
     if (theme.detail !== undefined && !isSafeThemeText(theme.detail)) return false;
     if (theme.tier !== "pro" || !isSafeThemeVersion(theme.version)) return false;
+    if (theme.access !== undefined && theme.access !== "public" && theme.access !== "restricted") return false;
+    if (theme.cssProfile !== undefined && theme.cssProfile !== "character-hero-light" && theme.cssProfile !== "dream-skin-light") return false;
+    if (theme.previewAsset !== undefined && (typeof theme.previewAsset !== "string" || !/^[a-z0-9][a-z0-9._-]{0,127}\.(png|jpe?g|webp)$/i.test(theme.previewAsset))) return false;
+    if (theme.heroAsset !== undefined && (typeof theme.heroAsset !== "string" || !/^[a-z0-9][a-z0-9._-]{0,127}\.(png|jpe?g|webp)$/i.test(theme.heroAsset))) return false;
+    if (theme.art !== undefined && (!isPlainObject(theme.art)
+      || !hasOnlyKeys(theme.art, ["focusX", "focusY", "safeArea", "taskMode", "layout"])
+      || typeof theme.art.focusX !== "number" || theme.art.focusX < 0 || theme.art.focusX > 1
+      || typeof theme.art.focusY !== "number" || theme.art.focusY < 0 || theme.art.focusY > 1
+      || !["left", "right", "center", "none"].includes(String(theme.art.safeArea))
+      || !["ambient", "banner", "off"].includes(String(theme.art.taskMode))
+      || (theme.art.layout !== undefined && !["auto", "card", "immersive"].includes(String(theme.art.layout))))) return false;
     if (!isPlainObject(theme.tokens) || !hasOnlyKeys(theme.tokens, visualThemeTokenKeys)) return false;
 
     const tokens = theme.tokens;
@@ -841,25 +923,25 @@ function writeVisualThemeManifestCache(serviceUrl: string, manifest: VisualTheme
   }
 }
 
-const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
-  { id: "overview", label: t("概览"), icon: LayoutDashboard },
-  { id: "account", label: "账户中心", icon: Crown },
-  { id: "activity", label: "活动中心", icon: Gift },
-  { id: "community", label: "超话", icon: MessageCircle },
-  { id: "announcements", label: "公告中心", icon: Bell },
-  { id: "announcementManagement", label: "公告管理", icon: Edit3 },
-  { id: "updates", label: "版本更新", icon: Download },
-  { id: "downloadChatGpt", label: "下载官方 ChatGPT", icon: Download },
-  { id: "relay", label: t("供应商配置"), icon: KeyRound },
-  { id: "sessions", label: t("会话管理"), icon: MessageCircle },
-  { id: "context", label: t("工具与插件"), icon: Network },
-  { id: "enhance", label: t("Codex增强"), icon: Hammer },
-  { id: "visualTheme", label: "视觉个性化", icon: Palette, badge: "PRO" },
-  { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink },
-  { id: "userScripts", label: "Skill 市场", icon: FileCode2 },
-  { id: "maintenance", label: t("安装维护"), icon: Wrench },
-  { id: "about", label: t("关于"), icon: Info },
-  { id: "settings", label: t("设置"), icon: Settings },
+const routes: Array<{ id: Route; label: string; icon: LucideIcon; group: NavigationGroupId; badge?: string; adminOnly?: boolean }> = [
+  { id: "overview", label: t("概览"), icon: LayoutDashboard, group: "workspace" },
+  { id: "account", label: "账户中心", icon: Crown, group: "community" },
+  { id: "activity", label: "活动中心", icon: Gift, group: "community" },
+  { id: "community", label: "超话", icon: MessageCircle, group: "community" },
+  { id: "announcements", label: "公告中心", icon: Bell, group: "community" },
+  { id: "announcementManagement", label: "公告管理", icon: Edit3, group: "community", adminOnly: true },
+  { id: "updates", label: "版本更新", icon: Download, group: "clientTools" },
+  { id: "downloadChatGpt", label: "下载官方 ChatGPT", icon: Download, group: "clientTools" },
+  { id: "visualTheme", label: "视觉个性化", icon: Palette, group: "clientTools", badge: "PRO" },
+  { id: "userScripts", label: "Skill 市场", icon: FileCode2, group: "clientTools" },
+  { id: "relay", label: t("供应商配置"), icon: KeyRound, group: "codexTools" },
+  { id: "sessions", label: t("会话管理"), icon: MessageCircle, group: "codexTools" },
+  { id: "context", label: t("工具与插件"), icon: Network, group: "codexTools" },
+  { id: "enhance", label: t("Codex增强"), icon: Hammer, group: "codexTools" },
+  { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink, group: "codexTools" },
+  { id: "maintenance", label: t("安装维护"), icon: Wrench, group: "system" },
+  { id: "about", label: t("关于"), icon: Info, group: "system" },
+  { id: "settings", label: t("设置"), icon: Settings, group: "system" },
 ];
 
 const defaultSettings: BackendSettings = {
@@ -908,7 +990,7 @@ const defaultSettings: BackendSettings = {
   codexAppImageOverlayFitMode: "fit",
   codexAppVisualThemeEnabled: false,
   codexAppVisualThemeId: "cyber-neon",
-  codexAppVisualThemeServiceUrl: "",
+  codexAppVisualThemeServiceUrl: "http://115.190.199.191:28080",
   codexGoalsEnabled: false,
   launchMode: "patch",
   relayBaseUrl: CODEWORK_API_BASE_URL,
@@ -957,7 +1039,10 @@ base_url = "${CODEWORK_API_BASE_URL}"
 
 export function App() {
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
+  const [clientSkin, setClientSkin] = useState(() => readInitialClientSkin(window.localStorage));
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
+  const [collapsedNavigationGroups, setCollapsedNavigationGroups] = useState<Set<NavigationGroupId>>(() => new Set());
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
   const [notice, setNotice] = useState<{ title: string; message: string; status?: Status } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -970,6 +1055,9 @@ export function App() {
   const [settings, setSettings] = useState<SettingsResult | null>(null);
   const [relay, setRelay] = useState<RelayResult | null>(null);
   const [relayFiles, setRelayFiles] = useState<RelayFilesResult | null>(null);
+  const [relayTokenSync, setRelayTokenSync] = useState<RelayTokenSyncResult | null>(null);
+  const [relayTokenSyncing, setRelayTokenSyncing] = useState(false);
+  const [workbuddyConfiguring, setWorkbuddyConfiguring] = useState(false);
   const [envConflicts, setEnvConflicts] = useState<EnvConflictsResult | null>(null);
   const [ccsProviders, setCcsProviders] = useState<CcsProvidersResult | null>(null);
   const [pendingProviderImport, setPendingProviderImport] = useState<ProviderImportRequest | null>(null);
@@ -1010,6 +1098,7 @@ export function App() {
   const [relaySwitching, setRelaySwitching] = useState(false);
   const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
   const [chatFriends, setChatFriends] = useState<ChatFriend[]>([]);
+  const [verifiedFriendProfiles, setVerifiedFriendProfiles] = useState<FriendSearchResult[]>(readVerifiedFriendProfiles);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [incomingFriendRequests, setIncomingFriendRequests] = useState<IncomingFriendRequest[]>([]);
   const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<OutgoingFriendRequest[]>([]);
@@ -1019,10 +1108,15 @@ export function App() {
   const chatPresenceRef = useRef<PresenceStatus>("online");
   const chatInitializedRef = useRef(false);
   const [memberActivity, setMemberActivity] = useState<MemberActivity | null>(null);
+  const [memberAccessToken, setMemberAccessToken] = useState("");
+  const [memberRememberedUsername, setMemberRememberedUsername] = useState("");
+  const [memberRememberedPassword, setMemberRememberedPassword] = useState("");
+  const [memberRememberPassword, setMemberRememberPassword] = useState(false);
   const [memberGateReady, setMemberGateReady] = useState(false);
   const [memberLoginApproved, setMemberLoginApproved] = useState(false);
   const [releaseResult, setReleaseResult] = useState<CodeworkReleaseResult | null>(null);
   const [releaseProgress, setReleaseProgress] = useState<InstallerProgress | null>(null);
+  const [releaseLastCheckedAt, setReleaseLastCheckedAt] = useState<number | null>(null);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [chatGptResult, setChatGptResult] = useState<ChatGptInstallResult | null>(null);
   const [chatGptProgress, setChatGptProgress] = useState<InstallerProgress | null>(null);
@@ -1044,7 +1138,10 @@ export function App() {
   const activeMemberIdentity = memberProfile ? getMemberIdentityDisplay(memberProfile) : null;
   const showWorkspaceUpdateNotice = availableRelease?.latestVersion !== dismissedUpdateVersion;
   const unreadAnnouncementCount = announcementFeed?.announcements.filter((announcement) => isAnnouncementUnread(announcement, announcementReadKeys)).length ?? 0;
+  const unreadMessageCount = chatFriends.reduce((count, friend) => count + Math.max(0, friend.unreadCount || 0), 0);
   const latestAnnouncement = announcementFeed?.announcements.find((announcement) => !dismissedAnnouncementIds.has(announcement.id)) ?? null;
+  const navigationGroups = groupNavigationItems(routes, route, Boolean(memberProfile?.actualAdmin));
+  const workspaceNotifications = buildNotificationSummary({ latestVersion: availableRelease?.latestVersion ?? null, unreadAnnouncements: unreadAnnouncementCount, unreadMessages: unreadMessageCount });
 
   const markAnnouncementRead = (announcement: ClientAnnouncement) => {
     const key = `${announcement.id}:${announcement.revision}`;
@@ -1068,32 +1165,42 @@ export function App() {
     }
   };
 
-  const refreshMemberProfile = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+  const refreshMemberProfile = async (candidateAccessToken?: string) => {
+    const accessToken = (candidateAccessToken ?? memberAccessToken).trim();
     if (!accessToken) {
+      void call("sync_visual_theme_member_session", { accessToken: "" }).catch(() => {});
       setMemberProfile(null);
+      setMemberLoginApproved(false);
       return null;
     }
     try {
       const result = await call<MemberProfileResult>("client_profile", { accessToken });
       const profile = isSuccessStatus(result.status) ? normalizeMemberProfile(result) : null;
       if (!profile) {
-        window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+        void call("clear_member_session").catch(() => {});
+        setMemberAccessToken("");
+        void call("sync_visual_theme_member_session", { accessToken: "" }).catch(() => {});
         setMemberProfile(null);
+        setMemberLoginApproved(false);
         return null;
       }
       setMemberProfile(profile);
+      setMemberLoginApproved(true);
+      void call("sync_visual_theme_member_session", { accessToken }).catch(() => {});
       void call("sync_client_identity_window_icon", { activeRole: profile.activeRole }).catch(() => {});
       return profile;
     } catch {
-      window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+      void call("clear_member_session").catch(() => {});
+      setMemberAccessToken("");
+      void call("sync_visual_theme_member_session", { accessToken: "" }).catch(() => {});
       setMemberProfile(null);
+      setMemberLoginApproved(false);
       return null;
     }
   };
 
   const changeMemberRole = async (activeRole: MemberRole) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken || !memberProfile?.actualAdmin) return;
     const result = await run(() => call<CommandResult<{ identity: { activeRole: MemberRole; actualAdmin: boolean } }>>("update_client_active_role", { accessToken, activeRole }));
     if (!result || !isSuccessStatus(result.status)) return;
@@ -1103,10 +1210,47 @@ export function App() {
     await refreshMemberActivity();
   };
 
+  const searchThemeGrantMember = async (query: string): Promise<ThemeGrantMemberRecord | null> => {
+    const accessToken = memberAccessToken.trim();
+    if (!accessToken || !memberProfile?.actualAdmin) return null;
+    const result = await run(() => call<CommandResult<{ member: ThemeGrantMemberRecord | null }>>(
+      "search_theme_grant_member",
+      { accessToken, query },
+    ));
+    if (!result) return null;
+    if (!isSuccessStatus(result.status)) {
+      showNotice("主题授权管理", result.message, result.status);
+      return null;
+    }
+    return result.member;
+  };
+
+  const saveThemeGrant = async (
+    member: ThemeGrantMember,
+    themeIds: string[],
+  ): Promise<ThemeGrantMemberRecord | null> => {
+    const accessToken = memberAccessToken.trim();
+    if (!accessToken || !memberProfile?.actualAdmin) return null;
+    const result = await run(() => call<CommandResult<{ member: ThemeGrantMemberRecord }>>(
+      "save_theme_grants",
+      { accessToken, userId: member.userId, themeIds: normalizeThemeGrantIds(themeIds) },
+    ));
+    if (!result) return null;
+    if (!isSuccessStatus(result.status)) {
+      showNotice("主题授权管理", result.message, result.status);
+      return null;
+    }
+    showNotice("主题授权管理", "授权已实时保存，用户刷新个性化页即可看到新主题。", "ok");
+    return result.member;
+  };
+
   const checkCodeworkRelease = async () => {
     setReleaseProgress({ stage: "checking" });
     const result = await run(() => call<CodeworkReleaseResult>("check_codework_release"));
-    if (result) setReleaseResult(result);
+    if (result) {
+      setReleaseResult(result);
+      setReleaseLastCheckedAt(Date.now());
+    }
     setReleaseProgress(null);
     return result;
   };
@@ -1135,8 +1279,8 @@ export function App() {
     if (result) setChatGptResult(result);
   };
 
-  const refreshMemberActivity = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+  const refreshMemberActivity = async (candidateAccessToken?: string) => {
+    const accessToken = (candidateAccessToken ?? memberAccessToken).trim();
     if (!accessToken) {
       setMemberActivity(null);
       return null;
@@ -1153,7 +1297,7 @@ export function App() {
   };
 
   const refreshCommunity = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) {
       setCommunity(null);
       return null;
@@ -1163,13 +1307,14 @@ export function App() {
     return result;
   };
 
-  const refreshPrivateFriends = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+  const refreshPrivateFriends = async (candidateAccessToken?: string) => {
+    const accessToken = (candidateAccessToken ?? memberAccessToken).trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<{ friends: ChatFriend[]; incomingRequests: IncomingFriendRequest[]; outgoingRequests: OutgoingFriendRequest[]; selfStatus: PresenceStatus }>>("list_private_friends", { accessToken }));
     if (result && isSuccessStatus(result.status)) {
-      const nextUnreadCounts = new Map(result.friends.map((friend) => [friend.userId, friend.unreadCount]));
-      const notifyingFriend = result.friends.find((friend) => shouldNotifyIncomingMessage(chatPresenceRef.current, chatUnreadCountsRef.current.get(friend.userId) ?? 0, friend.unreadCount));
+      const friends = applyVerifiedFriendProfiles(result.friends, verifiedFriendProfiles);
+      const nextUnreadCounts = new Map(friends.map((friend) => [friend.userId, friend.unreadCount]));
+      const notifyingFriend = friends.find((friend) => shouldNotifyIncomingMessage(chatPresenceRef.current, chatUnreadCountsRef.current.get(friend.userId) ?? 0, friend.unreadCount));
       if (chatInitializedRef.current && notifyingFriend) {
         setChatNotificationPulse((value) => value + 1);
         void getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(() => {});
@@ -1178,14 +1323,14 @@ export function App() {
       }
       chatUnreadCountsRef.current = nextUnreadCounts;
       chatInitializedRef.current = true;
-      setChatFriends(result.friends);
+      setChatFriends(friends);
       setIncomingFriendRequests(result.incomingRequests);
       setOutgoingFriendRequests(result.outgoingRequests ?? []);
       setChatSelfStatus(result.selfStatus);
     }
   };
   const changePrivatePresence = async (status: PresenceStatus) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const previousStatus = chatSelfStatus;
     setChatSelfStatus(status);
@@ -1199,19 +1344,19 @@ export function App() {
     }
   };
   const loadPrivateMessages = async (friendUserId: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<{ messages: ChatMessage[] }>>("load_private_messages", { accessToken, friendUserId }));
     if (result && isSuccessStatus(result.status)) setChatMessages(result.messages);
   };
   const sendPrivateMessage = async (friendUserId: string, content: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<{ message: ChatMessage }>>("send_private_message", { accessToken, friendUserId, content }));
     if (result && isSuccessStatus(result.status)) await loadPrivateMessages(friendUserId);
   };
   const sendPrivateAttachment = async (friendUserId: string, attachment: { dataBase64: string; fileName: string; mimeType: string }) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<{ message: ChatMessage }>>("send_private_attachment", {
       accessToken,
@@ -1223,13 +1368,13 @@ export function App() {
     if (result && isSuccessStatus(result.status)) await loadPrivateMessages(friendUserId);
   };
   const respondToFriendRequest = async (requestId: string, accept: boolean) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<unknown>>("respond_to_friend_request", { accessToken, requestId, accept }));
     if (result && isSuccessStatus(result.status)) await refreshPrivateFriends();
   };
   const requestFriend = async (userId: string, username: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<unknown>>("send_friend_request", { accessToken, userId, username }));
     if (result && isSuccessStatus(result.status)) {
@@ -1238,7 +1383,7 @@ export function App() {
     }
   };
   const cancelFriendRequest = async (friendUserId: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<{ cancelled: boolean }>>("cancel_friend_request", { accessToken, friendUserId }));
     if (result && isSuccessStatus(result.status)) {
@@ -1247,16 +1392,26 @@ export function App() {
     } else if (result) showNotice("好友申请", result.message, result.status);
   };
   const searchFriend = async (query: string): Promise<FriendSearchResult | null> => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return null;
     const result = await run(() => call<CommandResult<{ result: FriendSearchResult | null }>>("search_registered_friend", { accessToken, query }));
-    if (result && isSuccessStatus(result.status)) return result.result;
+    if (result && isSuccessStatus(result.status)) {
+      if (result.result) {
+        setVerifiedFriendProfiles((current) => {
+          const next = [...current.filter((item) => item.userId !== result.result!.userId), result.result!].slice(-200);
+          window.localStorage.setItem(VERIFIED_FRIEND_PROFILE_STORAGE_KEY, JSON.stringify(next));
+          setChatFriends((friends) => applyVerifiedFriendProfiles(friends, next));
+          return next;
+        });
+      }
+      return result.result;
+    }
     if (result) showNotice("搜索好友", result.message, result.status);
     return null;
   };
 
-  const refreshAnnouncements = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+  const refreshAnnouncements = async (candidateAccessToken?: string) => {
+    const accessToken = (candidateAccessToken ?? memberAccessToken).trim();
     if (!accessToken) {
       setAnnouncementFeed(null);
       return null;
@@ -1268,7 +1423,7 @@ export function App() {
   };
 
   const saveAnnouncement = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken || !announcementFeed?.canManage) return;
     const result = await run(() => call<CommandResult<{ announcement: ClientAnnouncement }>>("save_client_announcement", {
       accessToken,
@@ -1289,7 +1444,7 @@ export function App() {
   };
 
   const withdrawAnnouncement = async (announcementId: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken || !announcementFeed?.canManage) return;
     const result = await run(() => call<CommandResult<{ announcement: ClientAnnouncement }>>("withdraw_client_announcement", { accessToken, announcementId }));
     if (result && isSuccessStatus(result.status)) await refreshAnnouncements();
@@ -1297,7 +1452,7 @@ export function App() {
   };
 
   const publishCommunityComment = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     const content = communityDraft.trim();
     if (!accessToken || !content) return;
     const result = await run(() => call<CommandResult<{ comment: CommunityComment }>>("post_community_comment", { accessToken, content }));
@@ -1308,7 +1463,7 @@ export function App() {
   };
 
   const removeCommunityComment = async (commentId: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const confirmation = getCommunityDeleteConfirmation();
     if (!(await confirmSessionDelete(confirmation.title, confirmation.message))) return;
@@ -1318,20 +1473,20 @@ export function App() {
   };
 
   const toggleCommunityLike = async (commentId: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) return;
     const result = await run(() => call<CommandResult<unknown>>("toggle_community_comment_like", { accessToken, commentId }));
     if (result && isSuccessStatus(result.status)) await refreshCommunity();
   };
 
   const replyCommunityComment = async (commentId: string, content: string) => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken || !content.trim()) return;
     const result = await run(() => call<CommandResult<unknown>>("reply_to_community_comment", { accessToken, commentId, content: content.trim() }));
     if (result && isSuccessStatus(result.status)) await refreshCommunity();
   };
 
-  const loginMember = async (username: string, password: string) => {
+  const loginMember = async (username: string, password: string, rememberPassword = false) => {
     const result = await run(() => call<MemberLoginResult>("client_login", { username, password }));
     if (!result || !isSuccessStatus(result.status)) {
       if (result) showNotice("账户登录", result.message, result.status);
@@ -1343,21 +1498,40 @@ export function App() {
       showNotice("账户登录", "会员身份数据无效，请稍后重试。", "failed");
       return false;
     }
-    window.localStorage.setItem(MEMBER_ACCESS_TOKEN_KEY, accessToken);
+    const savedSession = await run(() => call<MemberSessionResult>("save_member_session", {
+      accessToken,
+      username: username.trim(),
+      password,
+      rememberPassword,
+    }));
+    if (!savedSession || !isSuccessStatus(savedSession.status)) {
+      if (savedSession) showNotice("账户安全", savedSession.message, savedSession.status);
+      return false;
+    }
+    setMemberAccessToken(accessToken);
+    setMemberRememberedUsername(savedSession.username);
+    setMemberRememberedPassword(savedSession.password);
+    setMemberRememberPassword(savedSession.rememberPassword);
     setMemberProfile(profile);
     setMemberLoginApproved(true);
     setRoute("account");
-    void refreshMemberActivity();
-    void refreshAnnouncements();
-    void refreshPrivateFriends();
+    void refreshMemberActivity(accessToken);
+    void refreshAnnouncements(accessToken);
+    void refreshPrivateFriends(accessToken);
+    void syncRelayTokens(true, { username: username.trim(), password });
     showNotice("账户登录", profile.tier === "supreme" ? "至尊 VIP 身份已核验。" : "普通 VIP 身份已核验。", "ok");
     return true;
   };
 
   const logoutMember = () => {
-    window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+    void call("clear_member_session").catch(() => {});
+    setMemberAccessToken("");
+    setMemberRememberedUsername("");
+    setMemberRememberedPassword("");
+    setMemberRememberPassword(false);
     setMemberProfile(null);
     setMemberActivity(null);
+    setRelayTokenSync(null);
     setAnnouncementFeed(null);
     setMemberLoginApproved(false);
   };
@@ -1739,10 +1913,10 @@ export function App() {
 
   const restart = async () => {
     const result = await launchCommand("restart_codex_plus");
-    if (result) {
-      showNotice(t("重启 Codex++"), result.message, result.status);
-      await refreshOverview(true);
-    }
+    if (!result) return false;
+    showNotice(t("重启 Codex++"), result.message, result.status);
+    await refreshOverview(true);
+    return isSuccessStatus(result.status);
   };
 
   const launchCommand = async (command: "launch_codex_plus" | "restart_codex_plus") => {
@@ -1910,6 +2084,7 @@ export function App() {
       setSettingsForm(normalizeSettings(result.settings));
       if (!silent || !isSuccessStatus(result.status)) showNotice(t("设置保存"), result.message, result.status);
     }
+    return !!result && isSuccessStatus(result.status);
   };
 
   const resetSettings = async () => {
@@ -2134,6 +2309,50 @@ export function App() {
     return result ?? null;
   };
 
+  const syncRelayTokens = async (silent = false, credentials?: { username: string; password: string }) => {
+    if (relayTokenSyncing) return null;
+    setRelayTokenSyncing(true);
+    try {
+      const result = await run(() => call<RelayTokenSyncResult>("sync_relay_tokens", credentials));
+      if (result) {
+        setRelayTokenSync((current) => isSuccessStatus(result.status) ? result : current ?? result);
+        if (!silent) showNotice("中转站令牌", result.message, result.status);
+      }
+      return result ?? null;
+    } finally {
+      setRelayTokenSyncing(false);
+    }
+  };
+
+  const applyRelayToken = async (accountId: string, tokenId: string) => {
+    const result = await run(() => call<RelayTokenApplyResult>("apply_relay_token", { accountId, tokenId }));
+    if (!result) return;
+    showNotice("中转站令牌", result.message, result.status);
+    if (isSuccessStatus(result.status)) {
+      await refreshSettings(true);
+      await refreshRelay(true);
+      await refreshRelayFiles(true);
+    }
+  };
+
+  const testRelayTokenConnection = async (accountId: string, tokenId: string) => {
+    const result = await run(() => call<RelayTokenConnectionResult>("test_relay_token_connection", { accountId, tokenId }));
+    if (result) showNotice("中转站连接", result.message, result.status);
+    return result ?? null;
+  };
+
+  const applyWorkbuddyRelayConfig = async () => {
+    if (workbuddyConfiguring) return null;
+    setWorkbuddyConfiguring(true);
+    try {
+      const result = await run(() => call<WorkbuddyConfigResult>("apply_workbuddy_relay_config"));
+      if (result) showNotice("WorkBuddy 一键配置", result.message, result.status);
+      return result ?? null;
+    } finally {
+      setWorkbuddyConfiguring(false);
+    }
+  };
+
   const testStepwiseSettings = async (settings: BackendSettings) => {
     const result = await run(() => call<StepwiseTestResult>("test_stepwise_settings", { settings }));
     if (result) showNotice("Stepwise 测试", result.message, result.status);
@@ -2282,8 +2501,27 @@ export function App() {
     }
   };
 
+  const saveVisualThemeSettings = async (
+    enabled: boolean,
+    themeId: string,
+    serviceUrl: string,
+    silent = true,
+  ) => {
+    const result = await run(() => call<SettingsResult>("save_visual_theme_settings", {
+      enabled,
+      themeId,
+      serviceUrl,
+    }));
+    if (result) {
+      setSettings(result);
+      setSettingsForm(normalizeSettings(result.settings));
+      if (!silent || !isSuccessStatus(result.status)) showNotice(t("设置保存"), result.message, result.status);
+    }
+    return !!result && isSuccessStatus(result.status);
+  };
+
   const openMemberActivityPortal = async () => {
-    const accessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim();
+    const accessToken = memberAccessToken.trim();
     if (!accessToken) {
       showNotice("需要登录", "请先登录 ♛Codework AI 官方账号，再进入活动官网。", "failed");
       return;
@@ -2330,8 +2568,56 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void refreshMemberProfile().finally(() => setMemberGateReady(true));
+    let cancelled = false;
+    void (async () => {
+      try {
+        let session = await call<MemberSessionResult>("load_member_session");
+        const legacyAccessToken = window.localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY)?.trim() ?? "";
+        const legacyCredentials = readRememberedMemberCredentials(
+          window.localStorage.getItem(MEMBER_REMEMBERED_CREDENTIALS_KEY),
+        );
+        window.localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+        window.localStorage.removeItem(MEMBER_REMEMBERED_CREDENTIALS_KEY);
+
+        if ((!isSuccessStatus(session.status) || !session.accessToken.trim()) && legacyAccessToken) {
+          session = await call<MemberSessionResult>("save_member_session", {
+            accessToken: legacyAccessToken,
+            username: legacyCredentials?.username ?? "legacy-member",
+            password: legacyCredentials?.password ?? "",
+            rememberPassword: Boolean(legacyCredentials),
+          });
+        }
+        if (cancelled) return;
+
+        const accessToken = isSuccessStatus(session.status) ? session.accessToken.trim() : "";
+        setMemberAccessToken(accessToken);
+        setMemberRememberedUsername(session.username || legacyCredentials?.username || "");
+        setMemberRememberedPassword(session.password || legacyCredentials?.password || "");
+        setMemberRememberPassword(session.rememberPassword || Boolean(legacyCredentials));
+        if (accessToken) {
+          const cachedRelayTokens = await call<RelayTokenSyncResult>("load_cached_relay_tokens");
+          if (!cancelled && isSuccessStatus(cachedRelayTokens.status) && cachedRelayTokens.tokens.length) {
+            setRelayTokenSync(cachedRelayTokens);
+          }
+          await refreshMemberProfile(accessToken);
+          if (session.rememberPassword) void syncRelayTokens(true);
+        }
+      } catch (error) {
+        if (!cancelled) showNotice("账户安全", stringifyError(error), "failed");
+      } finally {
+        if (!cancelled) setMemberGateReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!memberAccessToken.trim() || !memberRememberPassword) return;
+    const timer = window.setInterval(() => void syncRelayTokens(true), 10 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [memberAccessToken, memberRememberPassword]);
 
   useEffect(() => {
     chatPresenceRef.current = chatSelfStatus;
@@ -2342,13 +2628,13 @@ export function App() {
     void refreshPrivateFriends();
     const timer = window.setInterval(() => void refreshPrivateFriends(), 8000);
     return () => window.clearInterval(timer);
-  }, [memberLoginApproved]);
+  }, [memberAccessToken, memberLoginApproved]);
 
   useEffect(() => {
     void refreshAnnouncements();
     const timer = window.setInterval(() => void refreshAnnouncements(), 5 * 60 * 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [memberAccessToken]);
 
   useEffect(() => {
     if (getLanguage() === "en") {
@@ -2372,6 +2658,10 @@ export function App() {
     document.documentElement.classList.toggle("light", theme === "light");
     window.localStorage.setItem("codex-plus-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CLIENT_SKIN_STORAGE_KEY, clientSkin);
+  }, [clientSkin]);
 
   const saveCodexAppPath = async (appPath: string) => {
     const next = { ...settingsForm, codexAppPath: appPath };
@@ -2399,6 +2689,7 @@ export function App() {
       repairShortcuts,
       saveSettings,
       saveSettingsValue,
+      saveVisualThemeSettings,
       refreshSettings,
       resetSettings,
       resetImageOverlaySettings,
@@ -2447,7 +2738,7 @@ export function App() {
             directory: false,
             multiple: false,
             title: t("选择覆盖图片"),
-            filters: [{ name: t("图片"), extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
+            filters: [{ name: t("图片"), extensions: ["png", "jpg", "jpeg", "webp"] }],
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -2526,6 +2817,8 @@ export function App() {
         await refreshOverview(true);
         await refreshRelay(true);
         await refreshWatcher(true);
+        await refreshDiagnostics(true);
+        await checkCodeworkRelease();
         showNotice(t("检查完成"), t("已刷新 Codex 应用、入口和 Watcher 状态。"), "ok");
       },
       installWatcher: () => watcherAction("install_watcher"),
@@ -2538,7 +2831,7 @@ export function App() {
   );
 
   return (
-    <div className={`shell ${theme}`}>
+    <div className={`shell ${theme}`} data-client-skin={clientSkin} style={clientSkinVariables(clientSkin) as CSSProperties}>
       <aside className="sidebar">
         <div className="brand">
           <div className={`brand-mark ${activeMemberIdentity?.tone ?? "guest"}`}><Crown aria-label="Codework 身份皇冠" className="brand-crown" /></div>
@@ -2550,28 +2843,52 @@ export function App() {
           </div>
         </div>
         <nav className="nav">
-          {routes.filter((item) => item.id !== "announcementManagement" || announcementFeed?.canManage).map((item) => {
-            const Icon = item.icon;
-            const updateBadge = item.id === "updates" ? (availableRelease ? `NEW ${availableRelease.latestVersion}` : releaseResult?.currentVersion ?? overview?.current_version ?? "") : item.badge;
+          {navigationGroups.map((group) => {
+            const expanded = navigationGroupExpanded(group.expanded, group.id, collapsedNavigationGroups);
             return (
-            <button
-              className={`nav-item ${route === item.id ? "active" : ""}`}
-              key={item.id}
-              onClick={() => void navigate(item.id)}
-              title={item.label}
-              type="button"
-            >
-              <span className="nav-icon">
-                <Icon className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="nav-label">{item.label}</span>
-              {item.id === "announcements" && unreadAnnouncementCount ? <span className="nav-update-dot announcement-unread-dot" aria-label="有未读公告" /> : null}
-              {item.id === "updates" && availableRelease ? <span className="nav-update-dot" aria-label="发现新版本" /> : null}
-              {updateBadge ? <span className={`nav-badge ${item.id === "updates" && availableRelease ? "update-available" : ""}`}>{updateBadge}</span> : null}
-            </button>
-          );
+              <section className={`nav-group ${expanded ? "expanded" : "collapsed"}`} key={group.id}>
+                <button
+                  aria-expanded={expanded}
+                  className="nav-group-toggle"
+                  onClick={() => setCollapsedNavigationGroups((current) =>
+                    toggleNavigationGroup(group.expanded, group.id, current),
+                  )}
+                  type="button"
+                >
+                  <span>{group.label}</span><span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+                </button>
+                {expanded ? group.items.map((item) => {
+                  const routeItem = routes.find((candidate) => candidate.id === item.id);
+                  if (!routeItem) return null;
+                  const Icon = routeItem.icon;
+                  const updateBadge = routeItem.id === "updates" ? (availableRelease ? `NEW ${availableRelease.latestVersion}` : releaseResult?.currentVersion ?? overview?.current_version ?? "") : routeItem.badge;
+                  return (
+                    <button
+                      className={`nav-item ${route === routeItem.id ? "active" : ""}`}
+                      key={routeItem.id}
+                      onClick={() => void navigate(routeItem.id)}
+                      title={routeItem.label}
+                      type="button"
+                    >
+                      <span className="nav-icon"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                      <span className="nav-label">{routeItem.label}</span>
+                      {routeItem.id === "announcements" && unreadAnnouncementCount ? <span className="nav-update-dot announcement-unread-dot" aria-label="有未读公告" /> : null}
+                      {routeItem.id === "updates" && availableRelease ? <span className="nav-update-dot" aria-label="发现新版本" /> : null}
+                      {updateBadge ? <span className={`nav-badge ${routeItem.id === "updates" && availableRelease ? "update-available" : ""}`}>{updateBadge}</span> : null}
+                    </button>
+                  );
+                }) : null}
+              </section>
+            );
           })}
         </nav>
+        <div className="client-skin-switcher" aria-label="客户端皮肤">
+          <span>客户端皮肤</span>
+          <div>
+            <button className={clientSkin === "blue" ? "active blue" : "blue"} onClick={() => setClientSkin("blue")} type="button">蓝</button>
+            <button className={clientSkin === "pink" ? "active pink" : "pink"} onClick={() => setClientSkin("pink")} type="button">粉</button>
+          </div>
+        </div>
         <div className="sidebar-copyright">© 2026 Xiaoshuai</div>
       </aside>
       <main className="workspace">
@@ -2581,6 +2898,37 @@ export function App() {
             <p>{routeSubtitle(route)}</p>
           </div>
           <div className="topbar-actions">
+            <div className="notification-center">
+              <Button
+                aria-expanded={notificationCenterOpen}
+                onClick={() => setNotificationCenterOpen((open) => !open)}
+                size="icon"
+                title="通知中心"
+                variant="outline"
+              >
+                <Bell className="h-4 w-4" />
+                {workspaceNotifications.length ? <span className="notification-count">{workspaceNotifications.length}</span> : null}
+              </Button>
+              {notificationCenterOpen ? (
+                <section className="notification-popover" aria-label="通知中心">
+                  <div><strong>通知中心</strong><span>{workspaceNotifications.length ? "需要关注的事项" : "暂时没有需要处理的提醒"}</span></div>
+                  {workspaceNotifications.length ? workspaceNotifications.map((item) => (
+                    <button
+                      className="notification-entry"
+                      key={item.id}
+                      onClick={() => {
+                        if (item.id === "announcements" && latestAnnouncement) markAnnouncementRead(latestAnnouncement);
+                        setNotificationCenterOpen(false);
+                        void navigate(item.route as Route);
+                      }}
+                      type="button"
+                    >
+                      <strong>{item.title}</strong><span>{item.detail}</span>
+                    </button>
+                  )) : <p className="notification-empty">新版本、公告和未读私聊会集中显示在这里。</p>}
+                </section>
+              ) : null}
+            </div>
             <Button
               onClick={() => toggleLanguage()}
               size="icon"
@@ -2646,13 +2994,15 @@ export function App() {
               onLogout={logoutMember}
               onRefresh={refreshMemberProfile}
               onChangeActiveRole={changeMemberRole}
+              onSearchThemeGrantMember={searchThemeGrantMember}
+              onSaveThemeGrant={saveThemeGrant}
             />
           ) : null}
           {route === "activity" ? <ActivityCenterScreen activity={memberActivity} onOpenPortal={openMemberActivityPortal} onRefresh={refreshMemberActivity} /> : null}
           {route === "community" ? <CommunityScreen community={community} profile={memberProfile} draft={communityDraft} onDraftChange={setCommunityDraft} onPublish={publishCommunityComment} onDelete={removeCommunityComment} onLike={toggleCommunityLike} onReply={replyCommunityComment} onRefresh={refreshCommunity} /> : null}
           {route === "announcements" ? <AnnouncementCenterScreen feed={announcementFeed} onRead={markAnnouncementRead} onRefresh={refreshAnnouncements} /> : null}
           {route === "announcementManagement" && announcementFeed?.canManage ? <AnnouncementManagementScreen draft={announcementDraft} editingId={editingAnnouncementId} feed={announcementFeed} onDraftChange={setAnnouncementDraft} onEdit={editAnnouncement} onPublish={saveAnnouncement} onWithdraw={withdrawAnnouncement} /> : null}
-          {route === "updates" ? <ReleaseNotesScreen release={releaseResult} progress={releaseProgress} onCheck={checkCodeworkRelease} onInstall={installCodeworkRelease} /> : null}
+          {route === "updates" ? <ReleaseNotesScreen lastCheckedAt={releaseLastCheckedAt} release={releaseResult} progress={releaseProgress} onCheck={checkCodeworkRelease} onInstall={installCodeworkRelease} /> : null}
           {route === "downloadChatGpt" ? <OfficialChatGptScreen result={chatGptResult} progress={chatGptProgress} onRefresh={refreshChatGptStatus} onInstall={installOfficialChatGpt} /> : null}
           {route === "relay" ? (
             <RelayScreen
@@ -2660,6 +3010,15 @@ export function App() {
               relayFiles={relayFiles}
               envConflicts={envConflicts}
               ccsProviders={ccsProviders}
+              relayTokenSync={relayTokenSync}
+              relayTokenSyncing={relayTokenSyncing}
+              workbuddyConfiguring={workbuddyConfiguring}
+              onApplyWorkbuddyConfig={applyWorkbuddyRelayConfig}
+              memberLoggedIn={Boolean(memberAccessToken.trim())}
+              activeProfileId={settings?.settings.activeRelayId || ""}
+              onSyncRelayTokens={syncRelayTokens}
+              onApplyRelayToken={applyRelayToken}
+              onTestRelayToken={testRelayTokenConnection}
               form={settingsForm}
               onFormChange={setSettingsForm}
               actions={actions}
@@ -2755,6 +3114,9 @@ export function App() {
       ) : null}
        {memberLoginApproved && memberProfile ? <PrivateChat friends={chatFriends} messages={chatMessages} notificationPulse={chatNotificationPulse} onCancelRequest={cancelFriendRequest} onLoadMessages={(id) => void loadPrivateMessages(id)} onPresenceChange={changePrivatePresence} onRequest={requestFriend} onRespond={(id, accept) => void respondToFriendRequest(id, accept)} onSearch={searchFriend} onSend={(id, content) => void sendPrivateMessage(id, content)} onSendAttachment={(id, attachment) => sendPrivateAttachment(id, attachment)} outgoingRequests={outgoingFriendRequests} requests={incomingFriendRequests} selfId={memberProfile.userId} selfIsAdmin={memberProfile.actualAdmin} selfStatus={chatSelfStatus} /> : null}
       <MemberLoginGate
+        initialPassword={memberRememberedPassword}
+        initialRememberPassword={memberRememberPassword}
+        initialUsername={memberRememberedUsername}
         loading={!memberGateReady}
         onLogin={loginMember}
         onOpenExternalUrl={actions.openExternalUrl}
@@ -2767,7 +3129,7 @@ export function App() {
 type Actions = {
   refreshCurrent: () => Promise<void>;
   launch: () => Promise<void>;
-  restart: () => Promise<void>;
+  restart: () => Promise<boolean>;
   repairPluginMarketplace: () => Promise<void>;
   refreshRemotePluginMarketplace: (silent?: boolean) => Promise<RemotePluginMarketplaceResult | null>;
   repairRemotePluginMarketplace: () => Promise<void>;
@@ -2775,7 +3137,8 @@ type Actions = {
   uninstallEntrypoints: () => Promise<void>;
   repairShortcuts: () => Promise<void>;
   saveSettings: () => Promise<void>;
-  saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<void>;
+  saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<boolean>;
+  saveVisualThemeSettings: (enabled: boolean, themeId: string, serviceUrl: string, silent?: boolean) => Promise<boolean>;
   refreshSettings: (silent?: boolean) => Promise<BackendSettings | null>;
   resetSettings: () => Promise<void>;
   resetImageOverlaySettings: () => Promise<void>;
@@ -2846,12 +3209,16 @@ function MemberAccountScreen({
   onLogout,
   onRefresh,
   onChangeActiveRole,
+  onSearchThemeGrantMember,
+  onSaveThemeGrant,
 }: {
   profile: MemberProfile | null;
   onLogin: (username: string, password: string) => Promise<boolean>;
   onLogout: () => void;
   onRefresh: () => Promise<MemberProfile | null>;
   onChangeActiveRole: (role: MemberRole) => Promise<void>;
+  onSearchThemeGrantMember: (query: string) => Promise<ThemeGrantMemberRecord | null>;
+  onSaveThemeGrant: (member: ThemeGrantMember, themeIds: string[]) => Promise<ThemeGrantMemberRecord | null>;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -2919,6 +3286,12 @@ function MemberAccountScreen({
           </CardContent>
         </Panel>
       ) : null}
+      {profile?.actualAdmin ? (
+        <ThemeGrantAdminPanel
+          onSearch={onSearchThemeGrantMember}
+          onSave={onSaveThemeGrant}
+        />
+      ) : null}
       {profile ? (
         <Panel>
           <CardHead title="已登录账户" detail="客户端只保存登录令牌，不保存密码；打开客户端时会自动重新核验。" />
@@ -2957,23 +3330,131 @@ function MemberAccountScreen({
   );
 }
 
+function ThemeGrantAdminPanel({
+  onSearch,
+  onSave,
+}: {
+  onSearch: (query: string) => Promise<ThemeGrantMemberRecord | null>;
+  onSave: (member: ThemeGrantMember, themeIds: string[]) => Promise<ThemeGrantMemberRecord | null>;
+}) {
+  const [query, setQuery] = useState("");
+  const [member, setMember] = useState<ThemeGrantMemberRecord | null>(null);
+  const [themeIds, setThemeIds] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState("");
+
+  const search = async () => {
+    const value = query.trim();
+    if (!value || searching) return;
+    setSearching(true);
+    setFeedback("");
+    try {
+      const resolved = await onSearch(value);
+      setMember(resolved);
+      setThemeIds(normalizeThemeGrantIds(resolved?.themeIds || []));
+      setFeedback(resolved ? "已找到该官方账号，可调整其限定主题授权。" : "未找到该官方账号，请核对用户名或用户 ID。");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const toggleTheme = (themeId: string, checked: boolean) => {
+    setThemeIds((current) => normalizeThemeGrantIds(checked ? [...current, themeId] : current.filter((id) => id !== themeId)));
+  };
+
+  const save = async (nextThemeIds = themeIds) => {
+    if (!member || saving || !canSaveThemeGrant(member, nextThemeIds)) return;
+    setSaving(true);
+    setFeedback("");
+    try {
+      const saved = await onSave(member, normalizeThemeGrantIds(nextThemeIds));
+      if (!saved) return;
+      setMember(saved);
+      setThemeIds(normalizeThemeGrantIds(saved.themeIds));
+      setFeedback(saved.themeIds.length ? "授权已保存，用户刷新个性化页面即可使用。" : "已撤销该账号的全部限定主题授权。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Panel className="theme-grant-admin-card">
+      <CardHead title="主题授权管理" detail="管理员专属：为已注册的官方账号一键发放或撤销限定个性化主题，保存后实时生效。" />
+      <CardContent>
+        <div className="theme-grant-search-row">
+          <Input
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void search(); } }}
+            placeholder="输入官方账号用户名或用户 ID"
+            value={query}
+          />
+          <Button disabled={searching || !query.trim()} onClick={() => void search()} type="button" variant="outline">
+            <RefreshCw className="h-4 w-4" />{searching ? "查询中…" : "查询账号"}
+          </Button>
+        </div>
+        {member ? (
+          <div className="theme-grant-member">
+            <div><span>已选账号</span><strong>{member.username}</strong></div>
+            <code>ID {member.userId}</code>
+          </div>
+        ) : null}
+        <div className="theme-grant-options" aria-disabled={!member}>
+          {restrictedThemeOptions.map((theme) => (
+            <label className={`theme-grant-option ${themeIds.includes(theme.id) ? "selected" : ""}`} key={theme.id}>
+              <input
+                checked={themeIds.includes(theme.id)}
+                disabled={!member || saving}
+                onChange={(event) => toggleTheme(theme.id, event.target.checked)}
+                type="checkbox"
+              />
+              <span>{theme.label}</span>
+            </label>
+          ))}
+        </div>
+        {feedback ? <p className="theme-grant-feedback">{feedback}</p> : null}
+        <Toolbar>
+          <Button disabled={!canSaveThemeGrant(member, themeIds) || saving} onClick={() => void save()} type="button">
+            <Save className="h-4 w-4" />{saving ? "保存中…" : "保存授权"}
+          </Button>
+          <Button disabled={!member || saving || themeIds.length === 0} onClick={() => void save([])} type="button" variant="outline">
+            <Trash2 className="h-4 w-4" />撤销全部
+          </Button>
+        </Toolbar>
+      </CardContent>
+    </Panel>
+  );
+}
+
 function MemberLoginGate({
+  initialPassword,
+  initialRememberPassword,
+  initialUsername,
   loading,
   onLogin,
   onOpenExternalUrl,
   visible,
 }: {
+  initialPassword: string;
+  initialRememberPassword: boolean;
+  initialUsername: string;
   loading: boolean;
-  onLogin: (username: string, password: string) => Promise<boolean>;
+  onLogin: (username: string, password: string, rememberPassword?: boolean) => Promise<boolean>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   visible: boolean;
 }) {
-  const [rememberedCredentials] = useState(() => readRememberedMemberCredentials(window.localStorage.getItem(MEMBER_REMEMBERED_CREDENTIALS_KEY)));
-  const [username, setUsername] = useState(() => rememberedCredentials?.username ?? "");
-  const [password, setPassword] = useState(() => rememberedCredentials?.password ?? "");
-  const [rememberPassword, setRememberPassword] = useState(Boolean(rememberedCredentials));
+  const [username, setUsername] = useState(initialUsername);
+  const [password, setPassword] = useState(initialPassword);
+  const [rememberPassword, setRememberPassword] = useState(initialRememberPassword);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (submitting) return;
+    setUsername(initialUsername);
+    setPassword(initialPassword);
+    setRememberPassword(initialRememberPassword);
+  }, [initialPassword, initialRememberPassword, initialUsername, submitting]);
 
   if (!visible && !loading) return null;
 
@@ -2982,15 +3463,10 @@ function MemberLoginGate({
     setError("");
     setSubmitting(true);
     try {
-      const loggedIn = await onLogin(username, password);
+      const loggedIn = await onLogin(username, password, rememberPassword);
       if (!loggedIn) {
         setError("账号、密码或会员身份核验未通过，请重试。");
         return;
-      }
-      if (rememberPassword) {
-        window.localStorage.setItem(MEMBER_REMEMBERED_CREDENTIALS_KEY, JSON.stringify({ username: username.trim(), password }));
-      } else {
-        window.localStorage.removeItem(MEMBER_REMEMBERED_CREDENTIALS_KEY);
       }
     } finally {
       setSubmitting(false);
@@ -3078,7 +3554,6 @@ function ActivityCenterScreen({
               <p>{campaign ? "已同步到当前正在进行的活动，点击按钮会在浏览器打开已登录的活动官网。" : "活动内容由服务器统一更新，点击按钮会在浏览器打开已登录的活动官网。"}</p>
             </div>
             <Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />刷新公告</Button>
-            <Button onClick={() => void onOpenPortal()} variant="secondary"><ExternalLink className="h-4 w-4" />进入活动官网</Button>
           </div>
         </CardContent>
       </Panel>
@@ -3092,13 +3567,19 @@ function ActivityCenterScreen({
             <div><span>结束时间</span><strong>{campaign ? formatTime(campaign.endsAt) : "以活动官网为准"}</strong></div>
           </div>
           <div className="activity-open-card">
-            <div>
-              <p className="eyebrow">SIGNED-IN HANDOFF</p>
-              <h3>在浏览器打开完整活动页</h3>
-              <p>客户端会先向服务器申请一次性登录票据，再打开活动官网。打开后就是你的当前账号状态，页面空间也比内嵌小框更舒服。</p>
+            <div className="activity-open-orb" aria-hidden="true"><Rocket className="h-6 w-6" /></div>
+            <div className="activity-open-content">
+              <div className="activity-open-trust"><CheckCircle2 className="h-4 w-4" />活动入口已为你准备好</div>
+              <h3>进入完整活动会场</h3>
+              <p>自动带上当前登录身份，直接进入官方活动页，不用重复输入账号和密码。</p>
+              <div className="activity-open-benefits" aria-label="活动入口权益">
+                <span>免重复登录</span>
+                <span>官方安全跳转</span>
+              </div>
             </div>
             <Button className="activity-open-button" onClick={() => void onOpenPortal()}>
-              <ExternalLink className="h-4 w-4" /> 进入已登录活动官网
+              <span><strong>进入活动官网</strong><small>浏览器安全打开</small></span>
+              <ExternalLink className="h-4 w-4" />
             </Button>
           </div>
         </CardContent>
@@ -3138,7 +3619,7 @@ function CommunityScreen({
   ];
   return <>
     <Panel className="activity-hero"><CardContent><div className="activity-hero-layout"><div className="activity-gift-wrap"><MessageCircle aria-hidden="true" /></div><div><p className="eyebrow">CODEWORK COMMUNITY</p><h2>超话</h2><p>登录用户可以分享想法、交流使用体验；评论会显示发布时间。</p></div><Button onClick={() => void onRefresh()} variant="outline"><RefreshCw className="h-4 w-4" />刷新</Button></div></CardContent></Panel>
-    <Panel><CardHead title="发布超话" detail={profile ? `当前账号：${profile.username}` : "请先登录官方账号"} /><CardContent><Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={500} placeholder="说点什么，最多 500 字…" /><div className="release-actions"><Button disabled={!profile || !draft.trim()} onClick={() => void onPublish()}><MessageCircle className="h-4 w-4" />发布</Button></div></CardContent></Panel>
+    <Panel className="community-compose-panel"><CardHead title="发布超话" detail={profile ? `当前账号：${profile.username}` : "请先登录官方账号"} /><CardContent><Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={500} placeholder="说点什么，最多 500 字…" /><div className="release-actions"><Button disabled={!profile || !draft.trim()} onClick={() => void onPublish()}><MessageCircle className="h-4 w-4" />发布</Button></div></CardContent></Panel>
     <Panel><CardHead title="最新超话" detail="昵称已脱敏，支持点赞和回复。" /><CardContent><div className="community-comment-list">{community?.comments?.length ? community.comments.map((comment) => { const canDelete = canModerate || comment.authorUserId === profile?.userId; const reply = replyDrafts[comment.id] ?? ""; return <article className="community-comment" key={comment.id}><div><strong>{comment.authorUsername}</strong><time>{formatTime(comment.createdAt)}</time></div><p>{comment.content}</p><div className="release-actions"><Button onClick={() => void onLike(comment.id)} size="sm" variant="outline">👍 {comment.likeCount}</Button>{canDelete ? <Button onClick={() => void onDelete(comment.id)} size="sm" variant="outline"><Trash2 className="h-4 w-4" />删除</Button> : null}</div>{comment.replies.length ? <div className="community-replies">{comment.replies.map((reply) => <p key={reply.id}><strong>{reply.authorUsername}</strong>：{reply.content}</p>)}</div> : null}<div className="community-reply-box"><Input value={reply} maxLength={500} placeholder="回复这条超话" onChange={(event) => setReplyDrafts({ ...replyDrafts, [comment.id]: event.target.value })} /><Button disabled={!reply.trim()} onClick={() => { void onReply(comment.id, reply); setReplyDrafts({ ...replyDrafts, [comment.id]: "" }); }} size="sm">回复</Button></div></article>; }) : <div className="empty">暂无超话，发布第一条吧。</div>}</div></CardContent></Panel>
   </>;
 }
@@ -3165,11 +3646,13 @@ function formatInstallStage(stage?: string) {
 }
 
 function ReleaseNotesScreen({
+  lastCheckedAt,
   release,
   progress,
   onCheck,
   onInstall,
 }: {
+  lastCheckedAt: number | null;
   release: CodeworkReleaseResult | null;
   progress: InstallerProgress | null;
   onCheck: () => Promise<unknown>;
@@ -3179,8 +3662,8 @@ function ReleaseNotesScreen({
   const releaseDisplay = release?.currentVersion && release?.latestVersion
     ? getCodeworkReleaseDisplay({ currentVersion: release.currentVersion, latestVersion: release.latestVersion, pendingTargetVersion: release.pendingTargetVersion })
     : null;
-  const updateIncomplete = releaseDisplay?.state === "update_incomplete";
-  const updateActionable = available || updateIncomplete;
+  const updateIncomplete = release?.updateState === "pending_confirmation" || releaseDisplay?.state === "update_incomplete";
+  const updateActionable = available || Boolean(release?.recoveryAction) || updateIncomplete;
   const percentage = progress?.percent;
   const updateSteps = getCodeworkUpdateSteps(progress?.stage);
   const currentUpdateStep = progress ? Math.max(0, updateSteps.indexOf(progress.stage as typeof updateSteps[number])) : -1;
@@ -3205,6 +3688,7 @@ function ReleaseNotesScreen({
         <CardContent>
           {updateIncomplete ? <p className="muted-copy">上一次更新未能确认管理端已经替换完成。请点击“重新更新”，客户端会先退出管理端再覆盖安装。</p> : null}
           {release ? <div className="release-actions"><UiBadge>{integrityVerified ? "发布清单签名已验证" : "等待完整性验证"}</UiBadge>{release.expectedSize ? <span className="muted-copy">安装包 {formatBytes(release.expectedSize)}</span> : null}{release.sha256 ? <span className="muted-copy">SHA-256 已提供</span> : null}{release.mandatory ? <UiBadge>重要更新</UiBadge> : null}</div> : null}
+          <p className="release-check-summary">{lastCheckedAt ? `上次检测：${formatTime(lastCheckedAt)}` : "尚未手动检测；客户端启动时会自动检测一次。"}</p>
           {release?.lastFailure ? <p className="muted-copy">上次更新失败原因：{release.lastFailure}</p> : null}
           {release?.notes?.length ? <ul className="release-note-list">{release.notes.map((note) => <li key={note}>{note}</li>)}</ul> : <p className="muted-copy">点击“重新检测”即可读取最新版本与更新说明。</p>}
           <div className="release-actions">
@@ -3361,6 +3845,15 @@ function RelayScreen({
   relayFiles,
   envConflicts,
   ccsProviders,
+  relayTokenSync,
+  relayTokenSyncing,
+  workbuddyConfiguring,
+  onApplyWorkbuddyConfig,
+  memberLoggedIn,
+  activeProfileId,
+  onSyncRelayTokens,
+  onApplyRelayToken,
+  onTestRelayToken,
   form,
   onFormChange,
   actions,
@@ -3369,6 +3862,15 @@ function RelayScreen({
   relayFiles: RelayFilesResult | null;
   envConflicts: EnvConflictsResult | null;
   ccsProviders: CcsProvidersResult | null;
+  relayTokenSync: RelayTokenSyncResult | null;
+  relayTokenSyncing: boolean;
+  workbuddyConfiguring: boolean;
+  onApplyWorkbuddyConfig: () => Promise<WorkbuddyConfigResult | null>;
+  memberLoggedIn: boolean;
+  activeProfileId: string;
+  onSyncRelayTokens: (silent?: boolean) => Promise<RelayTokenSyncResult | null>;
+  onApplyRelayToken: (accountId: string, tokenId: string) => Promise<void>;
+  onTestRelayToken: (accountId: string, tokenId: string) => Promise<RelayTokenConnectionResult | null>;
   form: BackendSettings;
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
@@ -3441,6 +3943,17 @@ function RelayScreen({
 
   return (
     <>
+      <RelayTokenPanel
+        memberLoggedIn={memberLoggedIn}
+        sync={relayTokenSync}
+        syncing={relayTokenSyncing}
+        activeProfileId={activeProfileId}
+        onApply={onApplyRelayToken}
+        onRefresh={onSyncRelayTokens}
+        onTestRelayToken={onTestRelayToken}
+        workbuddyConfiguring={workbuddyConfiguring}
+        onApplyWorkbuddyConfig={onApplyWorkbuddyConfig}
+      />
       <Panel>
         <CardHead title={t("供应商列表")} detail={tf("{0} 个供应商配置；可拖动排序，点编辑进入详情", [normalized.relayProfiles.length])} />
         <CardContent>
@@ -3520,6 +4033,197 @@ function RelayScreen({
       </Panel>
     </>
   );
+}
+
+function RelayTokenPanel({
+  memberLoggedIn,
+  sync,
+  syncing,
+  activeProfileId,
+  onApply,
+  onRefresh,
+  onTestRelayToken,
+  workbuddyConfiguring,
+  onApplyWorkbuddyConfig,
+}: {
+  memberLoggedIn: boolean;
+  sync: RelayTokenSyncResult | null;
+  syncing: boolean;
+  activeProfileId: string;
+  onApply: (accountId: string, tokenId: string) => Promise<void>;
+  onRefresh: (silent?: boolean) => Promise<RelayTokenSyncResult | null>;
+  onTestRelayToken: (accountId: string, tokenId: string) => Promise<RelayTokenConnectionResult | null>;
+  workbuddyConfiguring: boolean;
+  onApplyWorkbuddyConfig: () => Promise<WorkbuddyConfigResult | null>;
+}) {
+  const tokens = sync && isSuccessStatus(sync.status) ? sync.tokens : [];
+  const wallet = sync && isSuccessStatus(sync.status) ? sync.wallet : null;
+  const [modelSearch, setModelSearch] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  const [applyingTokenId, setApplyingTokenId] = useState("");
+  const [testingTokenId, setTestingTokenId] = useState("");
+  const [connectionSummary, setConnectionSummary] = useState<Record<string, string>>({});
+  const [workbuddySummary, setWorkbuddySummary] = useState<WorkbuddyConfigResult | null>(null);
+  const modelGroups = useMemo(() => groupRelayModels(tokens), [tokens]);
+  const normalizedSearch = modelSearch.trim().toLowerCase();
+  const hasDomesticTokens = useMemo(() => domesticRelayTokens(tokens).length > 0, [tokens]);
+  const applyWorkbuddy = async () => {
+    if (workbuddyConfiguring) return;
+    const result = await onApplyWorkbuddyConfig();
+    if (result) setWorkbuddySummary(result);
+  };
+  const applyToken = async (tokenId: string) => {
+    if (!sync?.accountId || applyingTokenId) return;
+    setApplyingTokenId(tokenId);
+    try { await onApply(sync.accountId, tokenId); } finally { setApplyingTokenId(""); }
+  };
+  const testToken = async (tokenId: string) => {
+    if (!sync?.accountId || testingTokenId) return;
+    setTestingTokenId(tokenId);
+    try {
+      const result = await onTestRelayToken(sync.accountId, tokenId);
+      if (result) setConnectionSummary((current) => ({
+        ...current,
+        [tokenId]: isSuccessStatus(result.status) ? `${result.latencyMs} ms · HTTP ${result.statusCode}` : result.message,
+      }));
+    } finally { setTestingTokenId(""); }
+  };
+  return (
+    <Panel>
+      <CardHead title="中转站令牌" detail="登录后直接从 gptproxy.site 安全同步；界面仅显示掩码，真实令牌保存在 Windows 凭据管理器。" />
+      <CardContent>
+        {tokens.length || wallet ? (
+          <>
+        <div className="relay-token-total">
+          <span>中转站钱包余额</span>
+          <strong>{walletBalanceDisplay(wallet)}</strong>
+          {wallet ? (
+            <small>{`上次刷新 ${formatTime(wallet.refreshedAtMs)}`}</small>
+          ) : (
+            <small>旧缓存暂不显示余额，点击“刷新令牌”即可同步当前钱包余额。</small>
+          )}
+          <small>仅显示当前登录中转站账户的钱包余额，不统计令牌额度。</small>
+        </div>
+        {tokens.length ? (
+        <div className="relay-model-center" aria-label="模型中心">
+          <div className="relay-model-center-head">
+            <div>
+              <strong>模型中心</strong>
+              <small>仅展示三个授权分组；展开查看本令牌实际授权的模型。</small>
+            </div>
+            <label className="relay-model-search">
+              <Search className="h-4 w-4" />
+              <input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="搜索模型" />
+            </label>
+          </div>
+          <div className="relay-model-groups">
+            {modelGroups.map((item) => {
+              const visibleModels = normalizedSearch
+                ? item.models.filter((model) => model.toLowerCase().includes(normalizedSearch))
+                : item.models;
+              const expanded = expandedGroups.has(item.group) || Boolean(normalizedSearch);
+              return (
+                <section className="relay-model-group" key={item.group}>
+                  <button
+                    className="relay-model-group-toggle"
+                    type="button"
+                    onClick={() => setExpandedGroups((current) => {
+                      const next = new Set(current);
+                      if (next.has(item.group)) next.delete(item.group); else next.add(item.group);
+                      return next;
+                    })}
+                    aria-expanded={expanded}
+                  >
+                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    <span>{item.group}</span>
+                    <UiBadge>{visibleModels.length} 个模型</UiBadge>
+                  </button>
+                  {expanded ? (
+                    <div className="relay-model-chips">
+                      {visibleModels.length ? visibleModels.map((model) => <span key={model}>{model}</span>) : <small>该令牌未授权此分组模型。</small>}
+                    </div>
+                  ) : null}
+                  {item.group === domesticRelayGroupLabel ? (
+                    <div className="relay-workbuddy-actions">
+                      <div>
+                        <small>一键把该分组同步进 WorkBuddy 自定义模型；只补齐缺失项与刷新密钥，不覆盖你已有的配置。</small>
+                        {workbuddySummary ? (
+                          <small className={isSuccessStatus(workbuddySummary.status) ? "" : "text-error"}>
+                            {workbuddySummary.message}
+                            {isSuccessStatus(workbuddySummary.status) && workbuddySummary.configPath
+                              ? ` · ${workbuddySummary.configPath}`
+                              : ""}
+                          </small>
+                        ) : null}
+                        {workbuddySummary && isSuccessStatus(workbuddySummary.status) && !workbuddySummary.installed && workbuddySummary.downloadUrl ? (
+                          <small>
+                            {`未检测到 WorkBuddy，可前往 ${workbuddySummary.downloadUrl} 安装后再打开。`}
+                          </small>
+                        ) : null}
+                      </div>
+                      <Button
+                        disabled={!hasDomesticTokens || workbuddyConfiguring}
+                        onClick={() => void applyWorkbuddy()}
+                        variant="secondary"
+                      >
+                        <RefreshCw className={workbuddyConfiguring ? "h-4 w-4 spin" : "h-4 w-4"} />
+                        {workbuddyConfiguring ? "配置中" : "一键配置 WorkBuddy"}
+                      </Button>
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+        ) : null}
+          </>
+        ) : null}
+        <div className="relay-token-toolbar">
+          <div>
+            <strong>{memberLoggedIn ? "已登录客户端账户" : "请先登录客户端账户"}</strong>
+            <small>{sync && !isSuccessStatus(sync.status) ? sync.message : tokens.length ? `已同步 ${tokens.length} 个令牌` : "点击刷新读取你自己的令牌列表"}</small>
+          </div>
+          <Button disabled={!memberLoggedIn || syncing} onClick={() => void onRefresh(false)} variant="secondary">
+            <RefreshCw className={syncing ? "h-4 w-4 spin" : "h-4 w-4"} />
+            {syncing ? "同步中" : "刷新令牌"}
+          </Button>
+        </div>
+        {tokens.length ? (
+          <div className="relay-token-list">
+            {tokens.map((token) => {
+              const usable = relayTokenCanApply(token);
+              return (
+                <div className="relay-token-row" key={token.id}>
+                  <div className="relay-token-main">
+                    <div className="relay-token-title">
+                      <strong>{token.name || `令牌 ${token.id}`}</strong>
+                      <UiBadge>{relayTokenStatus(token)}</UiBadge>
+                    </div>
+                    <span>{token.maskedKey} · {token.group || "默认分组"}</span>
+                    <small>可用额度：{formatRelayQuota(token)} · {formatRelayTokenExpiry(token.expiredTime)}{connectionSummary[token.id] ? ` · ${connectionSummary[token.id]}` : ""}</small>
+                  </div>
+                  <div className="relay-token-actions">
+                    <Button disabled={!usable || Boolean(applyingTokenId)} onClick={() => void applyToken(token.id)} size="sm" className={activeProfileId === `gptproxy-token-${sync?.accountId}-${token.id}` ? "relay-token-current" : ""}>
+                      {applyingTokenId === token.id ? "正在应用…" : activeProfileId === `gptproxy-token-${sync?.accountId}-${token.id}` ? "当前使用中 ✓" : usable ? "设为当前令牌" : relayTokenStatus(token)}
+                    </Button>
+                    <Button disabled={!usable || Boolean(testingTokenId)} onClick={() => void testToken(token.id)} size="sm" variant="secondary">
+                      {testingTokenId === token.id ? "测试中…" : "测试连接"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </CardContent>
+    </Panel>
+  );
+}
+
+function formatRelayTokenExpiry(expiredTime: number): string {
+  if (!expiredTime || expiredTime < 0) return "永久有效";
+  return `到期：${new Date(expiredTime * 1000).toLocaleDateString("zh-CN")}`;
 }
 
 function EnvConflictNotice({
@@ -4279,10 +4983,19 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
     return readVisualThemeManifestCache(form.codexAppVisualThemeServiceUrl);
   });
   const [serviceStatus, setServiceStatus] = useState(onlineManifest ? "已使用缓存主题" : "使用本地主题");
+  const [applyingThemeId, setApplyingThemeId] = useState<string | null>(null);
+  const [isRestoringTheme, setIsRestoringTheme] = useState(false);
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
-  const refreshAbortRef = useRef<AbortController | null>(null);
   const initialRefreshRef = useRef<string | null>(null);
+  const [previewAssets, setPreviewAssets] = useState<Record<string, string>>({});
+  const themeOperationBusy = applyingThemeId !== null || isRestoringTheme;
+  const customDreamSkin = useMemo(
+    () => form.codexAppImageOverlayEnabled && form.codexAppImageOverlayPath.trim()
+      ? createCustomDreamSkin({ dominant: "#f6aac4", luma: 0.72 }, form.codexAppImageOverlayPath)
+      : null,
+    [form.codexAppImageOverlayEnabled, form.codexAppImageOverlayPath],
+  );
   const setServiceUrlDraft = (next: string) => {
     serviceUrlDraftRef.current = next;
     setServiceUrl(next);
@@ -4292,26 +5005,22 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      refreshAbortRef.current?.abort();
     };
   }, []);
 
   const refreshOnlineThemes = useCallback(async (inputUrl: string) => {
     const requestId = ++requestRef.current;
-    refreshAbortRef.current?.abort();
     const normalizedUrl = normalizeThemeServiceUrl(inputUrl);
     if (!normalizedUrl) {
       setServiceStatus("主题服务地址仅支持 http 或 https");
       return;
     }
 
-    const controller = new AbortController();
-    refreshAbortRef.current = controller;
     setServiceStatus("正在刷新在线主题…");
     try {
-      const response = await fetch(`${normalizedUrl}/v1/themes/manifest`, { signal: controller.signal });
-      if (!response.ok) throw new Error("主题服务响应异常");
-      const manifest: unknown = await response.json();
+      const result = await invoke<CommandResult<VisualThemeManifest>>("load_visual_theme_manifest");
+      if (!isSuccessStatus(result.status)) throw new Error(result.message || "主题服务响应异常");
+      const { status: _status, message: _message, ...manifest } = result;
       if (!isSafeThemeManifest(manifest)) throw new Error("主题清单未通过安全校验");
       if (mountedRef.current && requestRef.current === requestId) {
         writeVisualThemeManifestCache(normalizedUrl, manifest);
@@ -4319,13 +5028,11 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
         setServiceStatus("在线主题已刷新");
       }
     } catch {
-      if (!controller.signal.aborted && mountedRef.current && requestRef.current === requestId) {
+      if (mountedRef.current && requestRef.current === requestId) {
         const cachedManifest = readVisualThemeManifestCache(normalizedUrl);
         setOnlineManifest(cachedManifest);
         setServiceStatus(cachedManifest ? "在线主题不可用，已使用缓存主题" : "在线主题不可用，已使用本地主题");
       }
-    } finally {
-      if (requestRef.current === requestId && refreshAbortRef.current === controller) refreshAbortRef.current = null;
     }
   }, []);
 
@@ -4345,8 +5052,36 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
   const themes = useMemo(() => {
     const merged = new Map(builtInVisualThemes.map((theme) => [theme.id, theme]));
     onlineManifest?.themes.forEach((theme) => merged.set(theme.id, theme));
-    return [...merged.values()];
-  }, [onlineManifest]);
+    if (customDreamSkin) merged.set(customDreamSkin.id, customDreamSkin);
+    return themesVisibleToMember({
+      version: onlineManifest?.version ?? "builtin",
+      updatedAt: onlineManifest?.updatedAt,
+      themes: [...merged.values()],
+      allowedThemeIds: onlineManifest?.allowedThemeIds,
+    });
+  }, [customDreamSkin, onlineManifest]);
+  const themeFeedback = useMemo(() => buildThemeFeedback(onlineManifest), [onlineManifest]);
+
+  useEffect(() => {
+    let disposed = false;
+    const pending = themes.filter((theme) => theme.authorized && theme.previewAsset && !previewAssets[theme.previewAsset]);
+    if (!pending.length) return;
+    void Promise.all(pending.map(async (theme) => {
+      for (const assetName of themePreviewAssetCandidates(theme)) {
+        try {
+          const result = await invoke<CommandResult<{ dataUri: string }>>("load_visual_theme_asset", { assetName });
+          if (isSuccessStatus(result.status) && typeof result.dataUri === "string") return [theme.previewAsset!, result.dataUri] as const;
+        } catch {
+        }
+      }
+      return null;
+    })).then((loaded) => {
+      if (disposed) return;
+      const next = Object.fromEntries(loaded.filter((item): item is readonly [string, string] => item !== null));
+      if (Object.keys(next).length) setPreviewAssets((current) => ({ ...current, ...next }));
+    });
+    return () => { disposed = true; };
+  }, [previewAssets, themes]);
 
   const saveServiceUrl = async () => {
     const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
@@ -4357,14 +5092,25 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
     const next = { ...form, codexAppVisualThemeServiceUrl: normalizedUrl ?? "" };
     onFormChange(next);
     setServiceUrlDraft(normalizedUrl ?? "");
-    await actions.saveSettingsValue(next, false);
+    await actions.saveVisualThemeSettings(
+      next.codexAppVisualThemeEnabled,
+      next.codexAppVisualThemeId,
+      next.codexAppVisualThemeServiceUrl,
+      false,
+    );
     if (mountedRef.current) setServiceStatus("主题服务地址已保存");
   };
 
   const apply = async (id: string) => {
+    if (themeOperationBusy) return;
     const normalizedUrl = normalizeThemeServiceUrl(serviceUrl);
     if (serviceUrl.trim() && !normalizedUrl) {
       setServiceStatus("主题服务地址仅支持 http 或 https");
+      return;
+    }
+    const selectedTheme = themes.find((theme) => theme.id === id);
+    if (!selectedTheme?.authorized) {
+      setServiceStatus("限定主题 · 请联系管理员开通");
       return;
     }
     const next = {
@@ -4373,12 +5119,73 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
       codexAppVisualThemeEnabled: true,
       codexAppVisualThemeId: id,
     };
-    onFormChange(next);
-    await actions.saveSettingsValue(next, false);
-    await actions.restart();
+    setApplyingThemeId(id);
+    try {
+      await runVisualThemeTransition({
+        enabled: true,
+        themeId: id,
+        serviceUrl: normalizedUrl ?? "",
+        displayName: selectedTheme.name,
+      }, {
+        saveSettings: id === "custom-dream-skin"
+          ? async (enabled, themeId, nextServiceUrl) => {
+            const saved = await actions.saveSettingsValue(next, true);
+            return saved && actions.saveVisualThemeSettings(enabled, themeId, nextServiceUrl, true);
+          }
+          : (enabled, themeId, nextServiceUrl) => actions.saveVisualThemeSettings(enabled, themeId, nextServiceUrl, false),
+        restart: actions.restart,
+        verifyRuntime: async (themeId, sinceMs) => {
+          try {
+            const result = await invoke<DreamSkinStatusResult>("dream_skin_status", { sinceMs });
+            if (!isSuccessStatus(result.status)) return { state: "pending" as const, themeId };
+            const state = result.dreamSkinState === "active"
+              ? "active"
+              : result.dreamSkinState === "failed"
+                ? "failed"
+                : "pending";
+            return {
+              state,
+              themeId: result.themeId ?? undefined,
+              message: result.runtimeMessage ?? undefined,
+            };
+          } catch {
+            return { state: "pending" as const, themeId };
+          }
+        },
+        setStatus: setServiceStatus,
+      });
+      onFormChange(next);
+    } catch (error) {
+      setServiceStatus(stringifyError(error));
+    } finally {
+      setApplyingThemeId(null);
+    }
   };
 
-  return <div className="stack">
+  const restoreOfficialTheme = async () => {
+    if (themeOperationBusy) return;
+    const next = { ...form, codexAppVisualThemeEnabled: false };
+    setIsRestoringTheme(true);
+    try {
+      await runVisualThemeTransition({
+        enabled: false,
+        themeId: next.codexAppVisualThemeId,
+        serviceUrl: next.codexAppVisualThemeServiceUrl,
+        displayName: "官方默认",
+      }, {
+        saveSettings: (enabled, themeId, nextServiceUrl) => actions.saveVisualThemeSettings(enabled, themeId, nextServiceUrl, false),
+        restart: actions.restart,
+        setStatus: setServiceStatus,
+      });
+      onFormChange(next);
+    } catch (error) {
+      setServiceStatus(stringifyError(error));
+    } finally {
+      setIsRestoringTheme(false);
+    }
+  };
+
+  return <div className="stack visual-theme-screen">
     <Panel>
       <CardHead title="视觉个性化 Pro" detail="主题会在重启 Codex++ 后立即应用；可从在线主题服务安全刷新。" />
       <CardContent>
@@ -4386,27 +5193,56 @@ function VisualThemeScreen({ form, onFormChange, actions }: { form: BackendSetti
           <Input value={serviceUrl} onChange={(event) => setServiceUrlDraft(event.currentTarget.value)} placeholder="http://服务器公网IP:28080" />
         </Field>
         <div className="actions">
-          <Button variant="secondary" onClick={() => void saveServiceUrl()}>保存服务地址</Button>
-          <Button variant="secondary" onClick={() => void refreshOnlineThemes(serviceUrl)}>刷新在线主题</Button>
+          <Button disabled={themeOperationBusy} variant="secondary" onClick={() => void saveServiceUrl()}>保存服务地址</Button>
+          <Button disabled={themeOperationBusy} variant="secondary" onClick={() => void refreshOnlineThemes(serviceUrl)}>刷新在线主题</Button>
         </div>
-        <p className="muted">服务状态：{serviceStatus}</p>
+        <div className={themeOperationBusy ? "theme-operation-status busy" : "theme-operation-status"} role="status" aria-live="polite">
+          <span className="theme-operation-indicator" aria-hidden="true" />
+          <span>服务状态：{serviceStatus}</span>
+        </div>
         {onlineManifest ? <p className="muted">在线版本：{onlineManifest.version} · {onlineManifest.updatedAt ?? "未提供更新时间"}</p> : null}
         {serviceStatus.includes("本地") || serviceStatus.includes("缓存") ? <p className="muted">网络失败时已使用本地/缓存主题。</p> : null}
+        <Card className="theme-card">
+          <CardHeader>
+            <CardTitle>主题同步反馈</CardTitle>
+            <CardDescription>刷新在线主题后，这里会直接显示本次账号可用的主题和云端同步结果。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {onlineManifest ? <div className="stack compact-stack">
+              <p className="muted">在线已加载：{themeFeedback.onlineThemeCount} 款主题</p>
+              <p className="muted">已授权限定主题：{themeFeedback.authorisedRestrictedNames.length ? themeFeedback.authorisedRestrictedNames.join("、") : "当前账号尚未获得限定主题授权"}</p>
+              <p className="muted">云端梦境：{themeFeedback.cloudDreamAvailable ? "已同步到主题清单，可直接应用" : "未出现在当前清单。请点击“刷新在线主题”；若仍未出现，请确认服务端已更新且账号已授权。"}</p>
+            </div> : <p className="muted">尚未获得在线主题清单。请检查主题服务地址后点击“刷新在线主题”。</p>}
+            {serviceStatus.includes("本地") || serviceStatus.includes("缓存") ? <p className="muted">当前显示的是本地/缓存结果，建议网络恢复后重新刷新，确认云端梦境和授权状态。</p> : null}
+          </CardContent>
+        </Card>
+        <Card className="theme-card custom-dream-skin-card">
+          <CardHeader>
+            <CardTitle>自定义皮肤</CardTitle>
+            <CardDescription>选择本地壁纸后生成 Dream Skin 浅色沉浸主题；图片只保留在你的电脑。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="actions">
+              <Button disabled={themeOperationBusy} variant="secondary" onClick={() => void actions.chooseImageOverlayPath()}>选择本地壁纸</Button>
+              <Button disabled={themeOperationBusy || !customDreamSkin} onClick={() => customDreamSkin && void apply(customDreamSkin.id)}>{applyingThemeId === "custom-dream-skin" ? "正在应用…" : "应用自定义皮肤"}</Button>
+            </div>
+            <p className="muted">{customDreamSkin ? `已选择：${form.codexAppImageOverlayPath}` : "支持 PNG、JPG、JPEG、WebP；请使用没有界面文字的壁纸。"}</p>
+            <p className="muted">推荐 16:9（1920×1080 或 2560×1440）；3:2、4:3 和竖图会自动完整显示，左右以主题底色自然补齐。</p>
+          </CardContent>
+        </Card>
         <div className="theme-grid">
           {themes.map((item) => {
             const builtInDetail = builtInVisualThemes.find((theme) => theme.id === item.id)?.detail;
-            return <Card key={item.id} className={form.codexAppVisualThemeId === item.id ? "theme-card selected" : "theme-card"}>
+            const applied = isAppliedVisualTheme({ enabled: form.codexAppVisualThemeEnabled, selectedId: form.codexAppVisualThemeId, item });
+            return <Card key={item.id} className={applied ? "theme-card selected" : "theme-card"}>
+              {item.previewAsset && previewAssets[item.previewAsset] ? <div className="theme-card-preview"><img alt={`${item.name} 主题预览`} src={previewAssets[item.previewAsset]} /></div> : null}
               <CardHeader><CardTitle>{item.name}</CardTitle><CardDescription>{item.detail ?? builtInDetail ?? "在线 Pro 主题"}</CardDescription></CardHeader>
-              <CardContent><Button onClick={() => void apply(item.id)}>{form.codexAppVisualThemeId === item.id && form.codexAppVisualThemeEnabled ? "当前使用" : "一键应用"}</Button></CardContent>
+              <CardContent><Button disabled={themeOperationBusy || !item.authorized} onClick={() => void apply(item.id)}>{!item.authorized ? "限定主题 · 请联系管理员开通" : applyingThemeId === item.id ? "正在应用…" : applied ? "重新应用" : "立即应用"}</Button></CardContent>
             </Card>;
           })}
         </div>
         <div className="actions">
-          <Button variant="secondary" onClick={() => {
-            const next = { ...form, codexAppVisualThemeEnabled: false };
-            onFormChange(next);
-            void actions.saveSettingsValue(next, false).then(() => actions.restart());
-          }}>恢复官方默认</Button>
+          <Button disabled={themeOperationBusy} variant="secondary" onClick={() => void restoreOfficialTheme()}>{isRestoringTheme ? "正在恢复…" : "恢复官方默认"}</Button>
         </div>
       </CardContent>
     </Panel>
@@ -4655,8 +5491,9 @@ function LogsPanel({ logs, actions }: { logs: LogsResult | null; actions: Action
 function DiagnosticsPanel({ diagnostics, actions }: { diagnostics: DiagnosticsResult | null; actions: Actions }) {
   return (
     <Panel>
-      <CardHead title={t("诊断报告")} detail={t("包含版本、路径、设置和平台信息")} />
+      <CardHead title={t("诊断报告")} detail={t("包含版本、状态摘要和平台信息，可安全发送给售后")} />
       <CardContent>
+        <p className="muted-copy">报告只包含版本、运行状态和功能开关摘要；不会包含 API Key、登录令牌、密码或完整配置内容。</p>
         <Textarea className="log-view tall" readOnly value={diagnostics?.report ?? t("尚未生成诊断报告。")} />
         <Toolbar>
           <Button onClick={() => void actions.refreshDiagnostics()}>{t("重新生成")}</Button>

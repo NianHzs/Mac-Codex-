@@ -1,5 +1,8 @@
 pub mod commands;
+pub mod dream_skin_commands;
 pub mod install;
+pub mod member_session;
+pub mod relay_tokens;
 pub mod release_update;
 
 use std::path::{Path, PathBuf};
@@ -9,6 +12,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, WindowEvent};
+#[cfg(windows)]
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
+    DWMWA_USE_IMMERSIVE_DARK_MODE,
+};
 
 const TRAY_ID: &str = "codex_plus_tray";
 const TRAY_TOOLTIP: &str = "\u{265B}Codework AI\u{5BA2}\u{6237}\u{7AEF}";
@@ -29,6 +37,13 @@ pub fn run(update_confirmation_path: Option<PathBuf>) {
     let Some(_guard) = acquire_single_instance_guard() else {
         return;
     };
+    if let Err(error) = confirm_update_start(update_confirmation_path.as_deref()) {
+        let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+            "manager.update_confirmation.failed",
+            serde_json::json!({ "error": error.to_string() }),
+        );
+        return;
+    }
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -45,24 +60,26 @@ pub fn run(update_confirmation_path: Option<PathBuf>) {
                 main_window_builder = main_window_builder.icon(icon)?;
             }
             let main_window = main_window_builder.build()?;
+            apply_manager_window_chrome(&main_window);
             install_tray(app)?;
             register_main_window_events(main_window);
-            if let Some(path) = update_confirmation_path.as_deref() {
-                write_update_confirmation_marker(path)?;
-                let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
-                    "manager.update_confirmation.written",
-                    serde_json::json!({
-                        "path": path,
-                        "version": codex_plus_core::version::DISPLAY_VERSION
-                    }),
-                );
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::client_login,
             commands::client_profile,
+            member_session::load_member_session,
+            member_session::save_member_session,
+            member_session::clear_member_session,
+            relay_tokens::sync_relay_tokens,
+            relay_tokens::load_cached_relay_tokens,
+            relay_tokens::apply_relay_token,
+            relay_tokens::test_relay_token_connection,
+            relay_tokens::apply_workbuddy_relay_config,
             commands::sync_visual_theme_member_session,
+            dream_skin_commands::dream_skin_status,
+            dream_skin_commands::apply_dream_skin,
+            dream_skin_commands::restore_dream_skin,
             commands::load_visual_theme_manifest,
             commands::load_visual_theme_asset,
             commands::update_client_active_role,
@@ -79,6 +96,8 @@ pub fn run(update_confirmation_path: Option<PathBuf>) {
             commands::send_friend_request,
             commands::cancel_friend_request,
             commands::search_registered_friend,
+            commands::search_theme_grant_member,
+            commands::save_theme_grants,
             commands::load_private_messages,
             commands::send_private_message,
             commands::send_private_attachment,
@@ -240,6 +259,45 @@ fn manager_exit_app<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     exit_manager_for_update(app);
 }
 
+#[cfg(windows)]
+fn apply_manager_window_chrome<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+
+    // Windows expects COLORREF values in BGR byte order. Keep the native
+    // title bar distinct from the product surface: a near-black indigo rather
+    // than the user's system accent purple, with high-contrast chrome icons.
+    let caption_color: u32 = 0x00331A11; // #111A33
+    let text_color: u32 = 0x00FFF1E9; // #E9F1FF
+    let use_dark_mode: i32 = 1;
+
+    let _ = window.set_theme(Some(tauri::Theme::Dark));
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &use_dark_mode as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            &caption_color as *const u32 as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR,
+            &text_color as *const u32 as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_manager_window_chrome<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
+
 pub(crate) fn exit_manager_for_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     mark_manager_exiting_for_update();
     app.exit(0);
@@ -264,6 +322,22 @@ fn write_update_confirmation_marker(path: &Path) -> anyhow::Result<()> {
         std::fs::remove_file(path)?;
     }
     std::fs::rename(&temporary_path, path)?;
+    Ok(())
+}
+
+fn confirm_update_start(path: Option<&Path>) -> anyhow::Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    write_update_confirmation_marker(path)?;
+    let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+        "manager.update_confirmation.written",
+        serde_json::json!({
+            "path": path,
+            "version": codex_plus_core::version::DISPLAY_VERSION,
+            "phase": "startup_before_gui"
+        }),
+    );
     Ok(())
 }
 
@@ -328,6 +402,29 @@ mod tests {
         );
         assert!(value["confirmedAtMs"].as_u64().is_some());
         assert!(!marker.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn update_confirmation_can_be_written_before_gui_initialization() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("update-start-confirmed.json");
+
+        confirm_update_start(Some(&marker)).unwrap();
+
+        assert!(marker.exists());
+    }
+
+    #[test]
+    fn update_confirmation_happens_before_tauri_builder_starts() {
+        let source = include_str!("lib.rs");
+        let confirmation = source
+            .find("confirm_update_start(update_confirmation_path.as_deref())")
+            .expect("startup should confirm a pending update");
+        let builder = source
+            .find("tauri::Builder::default()")
+            .expect("manager should construct the Tauri application");
+
+        assert!(confirmation < builder);
     }
 }
 
