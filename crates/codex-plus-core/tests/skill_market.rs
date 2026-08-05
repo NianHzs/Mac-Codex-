@@ -14,6 +14,12 @@ fn parses_official_skill_manifest_and_rejects_incomplete_entries() {
             "name": "智能文案助手",
             "description": "撰写实用文案",
             "version": "1.0.0",
+            "usage": {
+                "scenarios": "宣传文案与产品介绍",
+                "trigger": "安装后直接说：请使用智能文案助手",
+                "output": "标题、正文和修改建议",
+                "notice": "发布前请自行确认内容"
+            },
             "packageUrl": "https://example.invalid/smart-copywriter.zip",
             "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }]
@@ -22,6 +28,11 @@ fn parses_official_skill_manifest_and_rejects_incomplete_entries() {
 
     assert_eq!(manifest.skills.len(), 1);
     assert_eq!(manifest.skills[0].id, "smart-copywriter");
+    assert_eq!(manifest.skills[0].usage.scenarios, "宣传文案与产品介绍");
+    assert_eq!(
+        manifest.skills[0].usage.trigger,
+        "安装后直接说：请使用智能文案助手"
+    );
     assert!(parse_skill_manifest(json!({ "skills": [{ "id": "bad" }] })).is_err());
 }
 

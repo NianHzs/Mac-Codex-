@@ -22,11 +22,37 @@ pub struct SkillMarketManifest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillUsageGuide {
+    #[serde(default)]
+    pub scenarios: String,
+    #[serde(default)]
+    pub trigger: String,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default)]
+    pub notice: String,
+}
+
+impl Default for SkillUsageGuide {
+    fn default() -> Self {
+        Self {
+            scenarios: String::new(),
+            trigger: String::new(),
+            output: String::new(),
+            notice: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MarketSkill {
     pub id: String,
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub usage: SkillUsageGuide,
     pub version: String,
     #[serde(default)]
     pub author: String,
@@ -183,6 +209,11 @@ fn parse_market_skill(raw: &Value) -> anyhow::Result<MarketSkill> {
         id,
         name,
         description,
+        usage: raw
+            .get("usage")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default(),
         version,
         author: optional_string(raw, "author").unwrap_or_default(),
         tags,

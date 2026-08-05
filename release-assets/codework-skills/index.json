@@ -1,0 +1,126 @@
+{
+    "version":  1,
+    "updatedAt":  "2026-07-17T13:46:40.8806294Z",
+    "skills":  [
+                   {
+                       "id":  "smart-copywriter",
+                       "name":  "智能文案助手",
+                       "description":  "撰写宣传文案、标题与产品介绍",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "文案",
+                                    "营销"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "公众号、朋友圈、商品介绍与活动宣传。",
+                                     "trigger":  "安装后直接说“请用智能文案助手，为……写一版文案”，并补充平台、受众和语气。",
+                                     "output":  "标题备选、正文、卖点提炼和修改建议。",
+                                     "notice":  "发布前请核对事实、价格、联系方式和平台规则。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/smart-copywriter-1.0.0.zip",
+                       "sha256":  "0a9aec6c1527d925cd05fedfd139b72369dd288a2667cc504041eff51565c873"
+                   },
+                   {
+                       "id":  "short-video-script",
+                       "name":  "短视频脚本助手",
+                       "description":  "生成可直接拍摄的短视频脚本",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "短视频",
+                                    "脚本"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "抖音、视频号、快手口播、剧情或带货短视频。",
+                                     "trigger":  "安装后说“请用短视频脚本助手写一个关于……的视频脚本”，并说明时长和风格。",
+                                     "output":  "开场钩子、分镜、台词、画面提示和结尾引导。",
+                                     "notice":  "拍摄前请核对产品描述、版权素材和平台规范。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/short-video-script-1.0.0.zip",
+                       "sha256":  "0c10df5d20a8622db519a79069c5d519c73646e94737a0163f813c16a1fbe660"
+                   },
+                   {
+                       "id":  "spreadsheet-data-assistant",
+                       "name":  "表格数据助手",
+                       "description":  "整理和分析 Excel、CSV 数据",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "表格",
+                                    "数据"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "Excel、CSV 清洗、汇总、对比、统计与图表建议。",
+                                     "trigger":  "安装后提供表格文件并说“请用表格数据助手分析……”，说明需要的指标。",
+                                     "output":  "数据问题说明、整理结果、统计结论和可复用处理步骤。",
+                                     "notice":  "处理敏感数据前请先脱敏，并在覆盖原文件前确认备份。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/spreadsheet-data-assistant-1.0.0.zip",
+                       "sha256":  "45d6ba868fae4abb820c74071be85824da27cee9443189b514d9d784031dfcb5"
+                   },
+                   {
+                       "id":  "file-organization-assistant",
+                       "name":  "文件整理助手",
+                       "description":  "先预览、确认后再安全整理文件",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "文件",
+                                    "安全"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "按类型、日期或项目整理文件，查找重复和混乱目录。",
+                                     "trigger":  "安装后说“请用文件整理助手整理这个目录”，并提供需要处理的文件夹。",
+                                     "output":  "整理预览、移动或重命名清单以及确认后的执行结果。",
+                                     "notice":  "默认先预览；涉及删除、覆盖或大批量移动时必须再次确认。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/file-organization-assistant-1.0.0.zip",
+                       "sha256":  "b5a9b33fe99bf578abe006adaab0360c4a2cbf284a7ac6dd8611fc301b269d17"
+                   },
+                   {
+                       "id":  "code-debugging-assistant",
+                       "name":  "代码排错助手",
+                       "description":  "定位报错并给出最小修复方案",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "代码",
+                                    "排错"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "程序报错、测试失败、构建失败和行为异常。",
+                                     "trigger":  "安装后说“请用代码排错助手检查这个错误”，并提供日志、复现步骤和项目路径。",
+                                     "output":  "根因定位、证据、最小修复方案和验证命令。",
+                                     "notice":  "不会在未确认范围时执行破坏性命令或改动无关代码。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/code-debugging-assistant-1.0.0.zip",
+                       "sha256":  "418d9ba7c06cdea479e176acdafffa9888dea96d825a28b23c706abacc875c06"
+                   },
+                   {
+                       "id":  "project-bootstrap-assistant",
+                       "name":  "项目搭建助手",
+                       "description":  "从需求到可运行项目的搭建指导",
+                       "version":  "1.0.0",
+                       "author":  "Codework AI",
+                       "tags":  [
+                                    "项目",
+                                    "开发"
+                                ],
+                       "homepage":  "",
+                       "usage":  {
+                                     "scenarios":  "新建网站、工具、后台、桌面端或自动化项目。",
+                                     "trigger":  "安装后说“请用项目搭建助手创建……”，并说明目标用户、平台和核心功能。",
+                                     "output":  "技术方案、目录结构、可运行代码、启动方式和后续迭代建议。",
+                                     "notice":  "涉及账号、付费服务或生产部署时会先说明依赖和风险。"
+                                 },
+                       "packageUrl":  "http://115.190.199.191:20080/downloads/codework-skills/project-bootstrap-assistant-1.0.0.zip",
+                       "sha256":  "6d4cedd7481de65bb1c9817029153a5df6660cfc4685a63bb8f2da254630b9e7"
+                   }
+               ]
+}
