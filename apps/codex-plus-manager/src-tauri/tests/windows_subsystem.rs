@@ -69,6 +69,20 @@ fn manager_queues_codework_provider_urls_for_confirmation_on_startup() {
     assert!(main_rs.contains("manager.provider_import_url.pending"));
 }
 
+#[cfg(windows)]
+#[test]
+fn manager_uses_a_dedicated_deep_indigo_native_title_bar() {
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+    let cargo_toml = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+        .expect("read manager Cargo.toml");
+
+    assert!(lib_rs.contains("apply_manager_window_chrome(&main_window)"));
+    assert!(lib_rs.contains("DWMWA_CAPTION_COLOR"));
+    assert!(lib_rs.contains("DWMWA_TEXT_COLOR"));
+    assert!(cargo_toml.contains("Win32_Graphics_Dwm"));
+}
+
 #[test]
 fn codework_windows_identity_is_isolated_from_upstream() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -605,6 +619,11 @@ fn codework_installer_is_independent_and_packages_notices() {
         "Join-Path $cargoReleaseDir 'codework-codex-plus-plus-manager.exe'"
     ));
     assert!(build_script.contains("function Assert-NativeSuccess"));
+    assert!(build_script.contains("INSTALLER_SMOKE_TEST"));
+    assert!(build_script.contains("/DSMOKE_TEST"));
+    assert!(nsi.contains("!ifdef SMOKE_TEST"));
+    assert!(build_script.contains("codework-codex-plus-plus.exe"));
+    assert!(build_script.contains("codework-codex-plus-plus-manager.exe"));
     for checked_command in [
         "Assert-NativeSuccess 'npm ci' $LASTEXITCODE",
         "Assert-NativeSuccess 'npm run check' $LASTEXITCODE",
@@ -694,6 +713,25 @@ fn updater_silently_overwrites_then_restarts_the_new_manager() {
 }
 
 #[test]
+fn installer_stages_only_the_internal_codework_dream_skin_runtime() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let build_script = std::fs::read_to_string(
+        manifest_dir.join("../../../scripts/build-codework-windows.ps1"),
+    )
+    .expect("read Codework build script");
+
+    assert!(build_script.contains("$dreamSkinRuntimeFiles = @("));
+    assert!(build_script.contains("apply-codework-theme.ps1"));
+    assert!(build_script.contains("verify-dream-skin.ps1"));
+    assert!(!build_script.contains(
+        "Copy-Item -LiteralPath $dreamSkinSource -Destination $dreamSkinStage -Recurse -Force"
+    ));
+    assert!(build_script.contains("$dreamSkinExcludedFiles = @("));
+    assert!(build_script.contains("tray-dream-skin.ps1"));
+    assert!(build_script.contains("install-dream-skin.ps1"));
+}
+
+#[test]
 fn installer_waits_for_new_manager_and_restores_previous_binaries_on_timeout() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let installer = std::fs::read_to_string(
@@ -769,15 +807,21 @@ fn visual_theme_service_has_a_1panel_deployment_and_restricted_character_manifes
     assert!(app.contains("codexAppVisualThemeServiceUrl"));
     assert!(settings.contains("codex_app_visual_theme_service_url"));
     let manifest: serde_json::Value = serde_json::from_str(&themes).expect("parse theme manifest");
-    assert_eq!(manifest["version"], "1.2.0");
+    assert_eq!(manifest["version"], "2");
     let themes = manifest["themes"].as_array().expect("themes array");
-    assert_eq!(themes.len(), 3);
+    assert_eq!(themes.len(), 4);
     assert!(themes.iter().any(|theme| theme["id"] == "hello-kitty-christmas" && theme["access"] == "restricted"));
     assert!(themes.iter().any(|theme|
         theme["id"] == "shinchan-energy"
             && theme["cssProfile"] == "dream-skin-light"
             && theme["art"]["safeArea"] == "left"
             && theme["art"]["taskMode"] == "ambient"
+    ));
+    assert!(themes.iter().any(|theme|
+        theme["id"] == "hello-kitty-cloud-dream"
+            && theme["access"] == "restricted"
+            && theme["cssProfile"] == "dream-skin-light"
+            && theme["heroAsset"] == "kitty-cloud-dream.jpg"
     ));
 
     let mut theme_ids = std::collections::HashSet::new();

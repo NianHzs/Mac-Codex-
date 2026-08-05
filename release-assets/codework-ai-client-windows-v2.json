@@ -1,0 +1,15 @@
+{
+  "version": "1.3.93",
+  "downloadUrl": "http://115.190.199.191:20080/downloads/codework-ai-client-1.3.93-windows-x64-setup.exe",
+  "size": 18105723,
+  "sha256": "41b3e60c4b96438e34e713591eb599bd42176a2429a88128c649886d69756b7e",
+  "signature": "R9aDgqOgioAwzRCgdhCUT7bnOoaQW8AWMwZUCm3dlqHBX16McYDXXXOPZRjSbH06AoHb35sJRwTLIi7t7RcKBw==",
+  "publishedAt": "2026-08-01T00:00:00Z",
+  "minimumSupportedVersion": "1.3.19",
+  "mandatory": false,
+  "notes": [
+    "修复自定义壁纸在新版 Codex 主内容区的白屏与叠层问题。",
+    "优化浅色壁纸下的侧边栏、任务和 Markdown 文字可读性。",
+    "顶部首页/对话控制改为实际遮罩百分比，可分别调节阅读层透明度。"
+  ]
+}

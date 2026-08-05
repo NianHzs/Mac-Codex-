@@ -11,7 +11,11 @@ Var UpdateRollbackPath
 Var UpdateWaitCount
 
 Name "♛Codework AI客户端"
+!ifdef SMOKE_TEST
+OutFile "${ROOT}\dist\windows\Codework-installer-smoke.exe"
+!else
 OutFile "${ROOT}\dist\windows\♛Codework AI客户端-${VERSION}-windows-x64-setup.exe"
+!endif
 InstallDir "$LOCALAPPDATA\Programs\Codework Codex++"
 InstallDirRegKey HKCU "Software\CodeworkCodexPlusPlus" "InstallDir"
 RequestExecutionLevel user
@@ -33,6 +37,7 @@ SetCompressor /SOLID lzma
 
 Section "Install"
   SetOutPath "$INSTDIR"
+!ifndef SMOKE_TEST
   nsExec::ExecToStack 'taskkill /IM codework-codex-plus-plus.exe /F /T'
   Pop $0
   Pop $1
@@ -40,7 +45,9 @@ Section "Install"
   Pop $0
   Pop $1
   Sleep 1500
+!endif
 
+!ifndef SMOKE_TEST
   StrCpy $UpdateConfirmPath "$PROFILE\.codework-codex-plus-plus\update-start-confirmed.json"
   StrCpy $UpdateRollbackPath "$PROFILE\.codework-codex-plus-plus\update-rollback.json"
   CreateDirectory "$PROFILE\.codework-codex-plus-plus"
@@ -101,11 +108,19 @@ interactive_manager_locked:
   MessageBox MB_OK|MB_ICONEXCLAMATION "旧版管理工具仍在运行，暂时无法升级。请先退出 Codework 管理工具，再重新运行安装包。"
   Abort
 manager_checked:
+!endif
   SetOverwrite on
 
   File "${ROOT}\dist\windows\app\codework-codex-plus-plus.exe"
   File "${ROOT}\dist\windows\app\codework-codex-plus-plus-manager.exe"
   File "${ROOT}\THIRD_PARTY_NOTICES.txt"
+  SetOutPath "$INSTDIR\dream-skin"
+  File /r "${ROOT}\dist\windows\app\dream-skin\*.*"
+  SetOutPath "$INSTDIR"
+
+!ifdef SMOKE_TEST
+  Goto install_finished
+!endif
 
   Delete "$DESKTOP\Codework Codex++.lnk"
   Delete "$DESKTOP\Codework Codex++ 管理工具.lnk"
@@ -196,6 +211,7 @@ Section "Uninstall"
   Delete "$INSTDIR\codework-codex-plus-plus.exe.previous"
   Delete "$INSTDIR\codework-codex-plus-plus-manager.exe.previous"
   Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
+  RMDir /r "$INSTDIR\dream-skin"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
 

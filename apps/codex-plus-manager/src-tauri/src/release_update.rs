@@ -16,7 +16,7 @@ use tauri::Emitter;
 use crate::commands::{CommandResult, failed, ok};
 
 const CODEWORK_RELEASE_MANIFEST_URL: &str =
-    "http://115.190.199.191:20080/downloads/codework-ai-client-windows.json";
+    "http://115.190.199.191:20080/downloads/codework-ai-client-windows-v2.json";
 pub const RELEASE_PROGRESS_EVENT: &str = "codework-release-progress";
 const EMBEDDED_RELEASE_PUBLIC_KEY: &str =
     include_str!("../../../../release-assets/codework-release-public-key.txt");
@@ -62,6 +62,16 @@ pub struct CodeworkReleasePayload {
     pub minimum_supported_version: Option<String>,
     pub rollback_available: bool,
     pub last_failure: Option<String>,
+    pub update_state: String,
+    pub recovery_action: bool,
+}
+
+fn update_state_for(pending: Option<&PendingCodeworkUpdate>) -> (&'static str, bool) {
+    if pending.is_some() {
+        ("pending_confirmation", true)
+    } else {
+        ("idle", false)
+    }
 }
 
 pub fn payload_from_manifest(
@@ -69,6 +79,7 @@ pub fn payload_from_manifest(
     manifest: SignedReleaseManifest,
     pending: Option<&PendingCodeworkUpdate>,
 ) -> CodeworkReleasePayload {
+    let (update_state, recovery_action) = update_state_for(pending);
     let available = compare_release_versions(&manifest.version, current_version)
         .map(|ordering| ordering.is_gt())
         .unwrap_or(false);
@@ -88,6 +99,8 @@ pub fn payload_from_manifest(
             .map(|update| !update.previous_version.trim().is_empty())
             .unwrap_or(false),
         last_failure: pending.and_then(|update| update.last_failure.clone()),
+        update_state: update_state.to_string(),
+        recovery_action,
     }
 }
 
@@ -303,6 +316,7 @@ fn empty_codework_release_payload(
     current_version: String,
     pending: Option<&PendingCodeworkUpdate>,
 ) -> CodeworkReleasePayload {
+    let (update_state, recovery_action) = update_state_for(pending);
     CodeworkReleasePayload {
         available: false,
         current_version,
@@ -319,6 +333,8 @@ fn empty_codework_release_payload(
             .map(|update| !update.previous_version.trim().is_empty())
             .unwrap_or(false),
         last_failure: pending.and_then(|update| update.last_failure.clone()),
+        update_state: update_state.to_string(),
+        recovery_action,
     }
 }
 
@@ -495,6 +511,15 @@ mod tests {
 
         assert_eq!(pending.target_version, "1.3.37");
         assert_eq!(pending.previous_version, "1.3.36");
+    }
+
+    #[test]
+    fn pending_update_exposes_a_recoverable_status_message() {
+        let pending = PendingCodeworkUpdate::new("1.3.37", "1.3.36");
+        let payload = payload_from_manifest("1.3.36", fixture_manifest(), Some(&pending));
+
+        assert_eq!(payload.update_state, "pending_confirmation");
+        assert!(payload.recovery_action);
     }
 
     #[test]
