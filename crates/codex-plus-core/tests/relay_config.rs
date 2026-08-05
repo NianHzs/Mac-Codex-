@@ -1598,7 +1598,10 @@ fn backfill_relay_profile_reads_live_files_and_model() {
         r#"{"OPENAI_API_KEY":"sk-live"}"#,
     )
     .unwrap();
-    let mut profile = RelayProfile::default();
+    let mut profile = RelayProfile {
+        model: String::new(),
+        ..RelayProfile::default()
+    };
 
     backfill_relay_profile_from_home(temp.path(), &mut profile).unwrap();
 
@@ -1664,7 +1667,10 @@ command = "npx"
         r#"{"OPENAI_API_KEY":"sk-live"}"#,
     )
     .unwrap();
-    let mut profile = RelayProfile::default();
+    let mut profile = RelayProfile {
+        model: String::new(),
+        ..RelayProfile::default()
+    };
     let mut common = r#"[mcp_servers.context7]
 command = "npx"
 "#
@@ -1741,7 +1747,10 @@ enabled = true
 "#,
     )
     .unwrap();
-    let mut profile = RelayProfile::default();
+    let mut profile = RelayProfile {
+        model: String::new(),
+        ..RelayProfile::default()
+    };
     let mut common = r#"[plugins."superpowers@openai-curated"]
 enabled = true
 "#
@@ -3298,6 +3307,7 @@ experimental_bearer_token = "sk-new"
 "#
         .to_string(),
         auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model: String::new(),
         model_list: "deepseek-v4-flash[1M]\ndeepseek-v4-pro".to_string(),
         model_windows: String::new(),
         ..RelayProfile::default()

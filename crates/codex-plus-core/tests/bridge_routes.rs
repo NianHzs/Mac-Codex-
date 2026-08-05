@@ -32,6 +32,7 @@ async fn bridge_routes_cover_all_current_paths() {
         ("/devtools/open", json!({})),
         ("/manager/open", json!({})),
         ("/backend/status", json!({})),
+        ("/overlay/image-data", json!({})),
         ("/codex-model-catalog", json!({})),
         ("/codex-config-model", json!({})),
         ("/ads", json!({})),
@@ -105,6 +106,32 @@ async fn bridge_routes_cover_all_current_paths() {
             "{path} should be routed"
         );
     }
+}
+
+#[tokio::test]
+async fn local_overlay_image_bridge_returns_supported_image_as_data_uri() {
+    let temp = tempfile::tempdir().unwrap();
+    let image_path = temp.path().join("wallpaper.png");
+    std::fs::write(&image_path, b"local-wallpaper-bytes").unwrap();
+    let settings = BackendSettings {
+        codex_app_image_overlay_enabled: true,
+        codex_app_image_overlay_path: image_path.to_string_lossy().to_string(),
+        ..BackendSettings::default()
+    };
+    let ctx = BridgeContext::new(
+        Arc::new(FakeSettings::with_settings(settings)),
+        Arc::new(FakeRuntime::default()),
+        Arc::new(FakeData::default()),
+    );
+
+    let result = handle_bridge_request(ctx, "/overlay/image-data", json!({})).await;
+
+    assert_eq!(result["status"], json!("ok"));
+    assert_eq!(result["contentType"], json!("image/png"));
+    assert_eq!(
+        result["dataUri"],
+        json!("data:image/png;base64,bG9jYWwtd2FsbHBhcGVyLWJ5dGVz")
+    );
 }
 
 #[tokio::test]

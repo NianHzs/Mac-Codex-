@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::{Read, Write};
 use std::net::{TcpListener, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
@@ -77,6 +78,7 @@ pub fn select_packaged_codex_debug_port(requested: u16) -> u16 {
         requested,
         cfg!(windows),
         can_bind_loopback_port,
+        is_cdp_http_endpoint,
         find_available_loopback_port,
     )
 }
@@ -85,9 +87,14 @@ pub fn select_packaged_codex_debug_port_with(
     requested: u16,
     is_windows: bool,
     can_bind: impl Fn(u16) -> bool,
+    is_existing_cdp: impl Fn(u16) -> bool,
     find_available: impl Fn() -> u16,
 ) -> u16 {
-    select_platform_loopback_port_with(requested, is_windows, can_bind, find_available)
+    if !is_windows || can_bind(requested) || is_existing_cdp(requested) {
+        requested
+    } else {
+        find_available()
+    }
 }
 
 pub fn select_platform_loopback_port_with(
@@ -127,6 +134,38 @@ pub fn can_connect_loopback_port(port: u16) -> bool {
                 .ok()
         })
         .is_some()
+}
+
+pub fn is_cdp_http_endpoint(port: u16) -> bool {
+    let Some(address) = ("127.0.0.1", port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addresses| addresses.next())
+    else {
+        return false;
+    };
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+        &address,
+        std::time::Duration::from_millis(250),
+    ) else {
+        return false;
+    };
+    let timeout = Some(std::time::Duration::from_millis(250));
+    if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
+        return false;
+    }
+    let request = format!(
+        "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = Vec::with_capacity(4096);
+    let _ = stream.take(16 * 1024).read_to_end(&mut response);
+    let response = String::from_utf8_lossy(&response);
+    response.contains(" 200 ")
+        && response.contains("\"webSocketDebuggerUrl\"")
+        && response.contains("\"Browser\"")
 }
 
 pub fn acquire_loopback_port_guard(port: u16) -> std::io::Result<TcpListener> {

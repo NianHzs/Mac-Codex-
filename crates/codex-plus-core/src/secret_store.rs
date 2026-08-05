@@ -6,12 +6,31 @@ use serde::{Deserialize, Serialize};
 
 const WINDOWS_CREDENTIAL_SERVICE: &str = "Codework AI客户端";
 const SECRET_INVENTORY_FILE: &str = "secret-inventory.json";
+pub const MEMBER_ACCESS_TOKEN_SECRET: &str = "member/access-token";
 
 pub trait SecretBackend: Send + Sync {
     fn set(&self, key: &str, value: &str) -> anyhow::Result<()>;
     fn get(&self, key: &str) -> anyhow::Result<Option<String>>;
     fn delete(&self, key: &str) -> anyhow::Result<()>;
     fn list_keys(&self) -> anyhow::Result<Vec<String>>;
+}
+
+pub fn resolve_member_access_token(explicit_token: &str) -> anyhow::Result<Option<String>> {
+    resolve_member_access_token_with_backend(explicit_token, &WindowsSecretBackend::default())
+}
+
+pub fn resolve_member_access_token_with_backend(
+    explicit_token: &str,
+    backend: &dyn SecretBackend,
+) -> anyhow::Result<Option<String>> {
+    let explicit_token = explicit_token.trim();
+    if !explicit_token.is_empty() {
+        return Ok(Some(explicit_token.to_string()));
+    }
+    Ok(backend
+        .get(MEMBER_ACCESS_TOKEN_SECRET)?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
 }
 
 pub struct SecretStore<B: SecretBackend> {
@@ -228,7 +247,10 @@ fn write_secret_inventory(path: &Path, keys: Vec<String>) -> anyhow::Result<()> 
 
 #[cfg(test)]
 mod tests {
-    use super::{MemorySecretBackend, SecretStore};
+    use super::{
+        MEMBER_ACCESS_TOKEN_SECRET, MemorySecretBackend, SecretBackend, SecretStore,
+        resolve_member_access_token_with_backend,
+    };
 
     #[test]
     fn secret_store_sets_gets_and_deletes_without_returning_values_in_inventory() {
@@ -249,5 +271,26 @@ mod tests {
         store.delete("member/access-token").unwrap();
 
         assert_eq!(store.get("member/access-token").unwrap(), None);
+    }
+
+    #[test]
+    fn visual_theme_auth_falls_back_to_the_saved_member_session() {
+        let backend = MemorySecretBackend::default();
+        backend.set(MEMBER_ACCESS_TOKEN_SECRET, "saved-member-token").unwrap();
+
+        assert_eq!(
+            resolve_member_access_token_with_backend("theme-specific-token", &backend)
+                .unwrap()
+                .as_deref(),
+            Some("theme-specific-token")
+        );
+        assert_eq!(
+            resolve_member_access_token_with_backend("", &backend)
+                .unwrap()
+                .as_deref(),
+            Some("saved-member-token")
+        );
+        backend.delete(MEMBER_ACCESS_TOKEN_SECRET).unwrap();
+        assert_eq!(resolve_member_access_token_with_backend("", &backend).unwrap(), None);
     }
 }

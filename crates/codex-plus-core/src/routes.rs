@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use base64::Engine;
 use serde_json::{Value, json};
+use url::Url;
 
 use crate::models::{DeleteResult, DeleteStatus, ExportResult, ExportStatus, SessionRef};
 use crate::settings::{BackendSettings, SettingsStore};
@@ -164,6 +166,19 @@ pub async fn handle_bridge_request(
         "/devtools/open" => ctx.runtime.open_devtools().await,
         "/manager/open" => ctx.runtime.open_manager().await,
         "/backend/status" => ctx.runtime.backend_status().await,
+        "/overlay/image-data" => local_overlay_image_value(ctx.settings.get_settings().await),
+        "/identity/status" => Ok(json!({
+            "status": "ok",
+            "role": crate::identity_icon::active_role(),
+        })),
+        "/theme/manifest" => theme_manifest_value(ctx.settings.get_settings().await).await,
+        "/theme/assets" => {
+            let asset_name = payload
+                .get("assetName")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            theme_asset_value(ctx.settings.get_settings().await, asset_name).await
+        }
         "/codex-model-catalog" | "/codex-config-model" => ctx.runtime.codex_model_catalog().await,
         "/diagnostics/log" => diagnostic_log_value(payload.clone()),
         "/ads" => ctx.runtime.ads().await,
@@ -642,6 +657,119 @@ async fn settings_value(
     settings_payload_value(settings, codex_app_version)
 }
 
+fn theme_service_url(settings: &BackendSettings, route: &str) -> anyhow::Result<Url> {
+    if settings.codex_app_visual_theme_member_token.trim().is_empty() {
+        anyhow::bail!("Theme member session is unavailable");
+    }
+    let mut base = Url::parse(settings.codex_app_visual_theme_service_url.trim())?;
+    if !matches!(base.scheme(), "http" | "https") {
+        anyhow::bail!("Theme service URL must use HTTP or HTTPS");
+    }
+    base.set_query(None);
+    base.set_fragment(None);
+    let base_path = base.path().trim_end_matches('/');
+    base.set_path(&format!("{base_path}/"));
+    base.join(route).map_err(Into::into)
+}
+
+fn safe_theme_asset_name(value: &str) -> bool {
+    let value = value.trim();
+    let Some((stem, extension)) = value.rsplit_once('.') else { return false; };
+    !stem.is_empty()
+        && stem.len() <= 120
+        && matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp")
+        && stem.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+async fn theme_manifest_value(result: anyhow::Result<BackendSettings>) -> anyhow::Result<Value> {
+    let settings = result?;
+    let url = theme_service_url(&settings, "v1/themes/manifest")?;
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()?
+        .get(url)
+        .bearer_auth(settings.codex_app_visual_theme_member_token.trim())
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        anyhow::bail!("Theme service returned HTTP {}", response.status().as_u16());
+    }
+    Ok(response.json::<Value>().await?)
+}
+
+async fn theme_asset_value(
+    result: anyhow::Result<BackendSettings>,
+    asset_name: &str,
+) -> anyhow::Result<Value> {
+    if !safe_theme_asset_name(asset_name) {
+        anyhow::bail!("Theme asset name is invalid");
+    }
+    let settings = result?;
+    let url = theme_service_url(&settings, &format!("v1/themes/assets/{asset_name}"))?;
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?
+        .get(url)
+        .bearer_auth(settings.codex_app_visual_theme_member_token.trim())
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        anyhow::bail!("Theme service returned HTTP {}", response.status().as_u16());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or_default().trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(content_type.as_str(), "image/jpeg" | "image/png" | "image/webp") {
+        anyhow::bail!("Theme asset has an unsupported content type");
+    }
+    let bytes = response.bytes().await?;
+    if bytes.is_empty() || bytes.len() > 8 * 1024 * 1024 {
+        anyhow::bail!("Theme asset size is invalid");
+    }
+    Ok(json!({
+        "status": "ok",
+        "dataUri": format!("data:{content_type};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+    }))
+}
+
+fn local_overlay_image_value(result: anyhow::Result<BackendSettings>) -> anyhow::Result<Value> {
+    let settings = result?;
+    if !settings.codex_app_image_overlay_enabled {
+        anyhow::bail!("Local wallpaper is not enabled");
+    }
+    let image_path = PathBuf::from(settings.codex_app_image_overlay_path.trim());
+    if image_path.as_os_str().is_empty() || !image_path.is_file() {
+        anyhow::bail!("Local wallpaper file is unavailable");
+    }
+    let content_type = match image_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => anyhow::bail!("Local wallpaper format is unsupported"),
+    };
+    let bytes = std::fs::read(&image_path)?;
+    if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+        anyhow::bail!("Local wallpaper size is invalid");
+    }
+    Ok(json!({
+        "status": "ok",
+        "contentType": content_type,
+        "bytes": bytes.len(),
+        "dataUri": format!(
+            "data:{content_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ),
+    }))
+}
+
 fn result_value<T>(result: anyhow::Result<T>) -> anyhow::Result<Value>
 where
     T: serde::Serialize,
@@ -776,4 +904,21 @@ fn empty_user_script_inventory() -> Value {
         "enabled": true,
         "scripts": []
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn full_resolution_theme_assets_have_a_transfer_timeout_budget() {
+        let source = include_str!("routes.rs");
+        let asset_loader = source
+            .split("async fn theme_asset_value")
+            .nth(1)
+            .expect("theme asset loader exists")
+            .split("fn local_overlay_image_value")
+            .next()
+            .expect("theme asset loader has an end");
+
+        assert!(asset_loader.contains(".timeout(std::time::Duration::from_secs(30))"));
+    }
 }

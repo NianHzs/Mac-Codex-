@@ -2,20 +2,19 @@ use codex_plus_core::protocol_proxy::{
     ChatSseToResponsesConverter, chat_completion_to_response,
     chat_completion_to_response_with_request, chat_completions_url, chat_sse_to_responses_sse,
     chat_sse_to_responses_sse_with_request, is_chat_completions_proxy_path, is_models_proxy_path,
-    is_responses_proxy_path, models_url, open_chat_completions_proxy_request,
-    open_models_proxy_request, open_responses_proxy_request,
-    open_responses_proxy_request_with_settings, responses_error_from_upstream,
+    is_responses_proxy_path, models_url, open_chat_completions_proxy_request_with_settings,
+    open_models_proxy_request_with_settings, open_responses_proxy_request_with_settings,
+    open_responses_proxy_request_with_settings_and_user_agent, responses_error_from_upstream,
     responses_to_chat_completions, send_upstream_request_with_header_timeout,
     upstream_header_timeout, upstream_http_client, upstream_stream_header_timeout,
 };
 use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
-    RelayMode, RelayProfile,
+    RelayMode, RelayProfile, RelayProtocol,
 };
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1493,13 +1492,12 @@ fn aggregate_proxy_settings(
 #[tokio::test]
 async fn chat_completions_proxy_uses_configured_user_agent() {
     let _lock = settings_path_test_lock().lock().unwrap();
-    let temp = tempfile::tempdir().unwrap();
-    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
     let server = spawn_chat_server();
-    write_chat_relay_settings(temp.path(), &server.base_url, "Configured-Codex-UA/1.0");
+    let settings = chat_relay_settings(&server.base_url, "Configured-Codex-UA/1.0");
 
-    let upstream = open_chat_completions_proxy_request(
+    let upstream = open_chat_completions_proxy_request_with_settings(
         r#"{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}"#,
+        settings,
         Some("Original-Codex-UA/1.0"),
     )
     .await
@@ -1513,13 +1511,12 @@ async fn chat_completions_proxy_uses_configured_user_agent() {
 #[tokio::test]
 async fn chat_completions_proxy_passes_through_original_user_agent_when_unconfigured() {
     let _lock = settings_path_test_lock().lock().unwrap();
-    let temp = tempfile::tempdir().unwrap();
-    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
     let server = spawn_chat_server();
-    write_chat_relay_settings(temp.path(), &server.base_url, "");
+    let settings = chat_relay_settings(&server.base_url, "");
 
-    let upstream = open_chat_completions_proxy_request(
+    let upstream = open_chat_completions_proxy_request_with_settings(
         r#"{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}"#,
+        settings,
         Some("Original-Codex-UA/1.0"),
     )
     .await
@@ -1533,13 +1530,12 @@ async fn chat_completions_proxy_passes_through_original_user_agent_when_unconfig
 #[tokio::test]
 async fn responses_proxy_passes_through_original_user_agent_when_unconfigured() {
     let _lock = settings_path_test_lock().lock().unwrap();
-    let temp = tempfile::tempdir().unwrap();
-    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
     let server = spawn_chat_server();
-    write_chat_relay_settings(temp.path(), &server.base_url, "");
+    let settings = chat_relay_settings(&server.base_url, "");
 
-    let upstream = open_responses_proxy_request(
+    let upstream = open_responses_proxy_request_with_settings_and_user_agent(
         r#"{"model":"gpt-5.5","input":"hello","stream":false}"#,
+        settings,
         Some("Original-Codex-UA/1.0"),
     )
     .await
@@ -1553,12 +1549,10 @@ async fn responses_proxy_passes_through_original_user_agent_when_unconfigured() 
 #[tokio::test]
 async fn models_proxy_passes_through_original_user_agent_when_unconfigured() {
     let _lock = settings_path_test_lock().lock().unwrap();
-    let temp = tempfile::tempdir().unwrap();
-    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
     let server = spawn_chat_server();
-    write_chat_relay_settings(temp.path(), &server.base_url, "");
+    let settings = chat_relay_settings(&server.base_url, "");
 
-    let upstream = open_models_proxy_request(Some("Original-Codex-UA/1.0"))
+    let upstream = open_models_proxy_request_with_settings(settings, Some("Original-Codex-UA/1.0"))
         .await
         .unwrap();
     assert_eq!(upstream.status_code, 200);
@@ -1567,47 +1561,27 @@ async fn models_proxy_passes_through_original_user_agent_when_unconfigured() {
     assert_eq!(request.user_agent, "Original-Codex-UA/1.0");
 }
 
-fn write_chat_relay_settings(settings_dir: &Path, base_url: &str, user_agent: &str) {
-    let settings = json!({
-        "relayProfiles": [{
-            "id": "chat",
-            "name": "Chat",
-            "baseUrl": base_url,
-            "upstreamBaseUrl": base_url,
-            "apiKey": "sk-test",
-            "protocol": "chatCompletions",
-            "relayMode": "mixedApi",
-            "userAgent": user_agent
+fn chat_relay_settings(base_url: &str, user_agent: &str) -> BackendSettings {
+    BackendSettings {
+        relay_profiles: vec![RelayProfile {
+            id: "chat".to_string(),
+            name: "Chat".to_string(),
+            base_url: base_url.to_string(),
+            upstream_base_url: base_url.to_string(),
+            api_key: "sk-test".to_string(),
+            protocol: RelayProtocol::ChatCompletions,
+            relay_mode: RelayMode::MixedApi,
+            user_agent: user_agent.to_string(),
+            ..RelayProfile::default()
         }],
-        "activeRelayId": "chat"
-    });
-    std::fs::write(
-        settings_dir.join("settings.json"),
-        serde_json::to_vec_pretty(&settings).unwrap(),
-    )
-    .unwrap();
-}
-
-struct SettingsPathGuard {
-    previous: Option<PathBuf>,
+        active_relay_id: "chat".to_string(),
+        ..BackendSettings::default()
+    }
 }
 
 fn settings_path_test_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
-}
-
-impl SettingsPathGuard {
-    fn set(path: PathBuf) -> Self {
-        let previous = codex_plus_core::paths::set_settings_path_for_tests(Some(path));
-        Self { previous }
-    }
-}
-
-impl Drop for SettingsPathGuard {
-    fn drop(&mut self) {
-        codex_plus_core::paths::set_settings_path_for_tests(self.previous.take());
-    }
 }
 
 struct ChatServer {

@@ -307,7 +307,7 @@ pub struct BackendSettings {
     pub codex_app_visual_theme_enabled: bool,
     #[serde(rename = "codexAppVisualThemeId", default)]
     pub codex_app_visual_theme_id: String,
-    #[serde(rename = "codexAppVisualThemeServiceUrl", default)]
+    #[serde(rename = "codexAppVisualThemeServiceUrl", default = "default_visual_theme_service_url")]
     pub codex_app_visual_theme_service_url: String,
     #[serde(rename = "codexAppVisualThemeMemberToken", default)]
     pub codex_app_visual_theme_member_token: String,
@@ -383,7 +383,7 @@ impl Default for BackendSettings {
             codex_app_image_overlay_fit_mode: default_image_overlay_fit_mode(),
             codex_app_visual_theme_enabled: false,
             codex_app_visual_theme_id: "cyber-neon".to_string(),
-            codex_app_visual_theme_service_url: String::new(),
+            codex_app_visual_theme_service_url: default_visual_theme_service_url(),
             codex_app_visual_theme_member_token: String::new(),
             codex_goals_enabled: false,
             launch_mode: LaunchMode::Patch,
@@ -567,6 +567,10 @@ pub fn clamp_stepwise_timeout_ms(value: u64) -> u64 {
 
 pub fn default_true() -> bool {
     true
+}
+
+pub fn default_visual_theme_service_url() -> String {
+    "http://115.190.199.191:28080".to_string()
 }
 
 pub fn default_relay_base_url() -> String {
@@ -2346,6 +2350,14 @@ experimental_bearer_token = "sk-existing"
         assert_eq!(
             store.load().unwrap().codex_app_visual_theme_service_url,
             "https://themes.example.test/v1"
+        );
+    }
+
+    #[test]
+    fn default_settings_use_the_codework_theme_service() {
+        assert_eq!(
+            BackendSettings::default().codex_app_visual_theme_service_url,
+            "http://115.190.199.191:28080"
         );
     }
 

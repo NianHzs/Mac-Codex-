@@ -492,7 +492,7 @@ pub async fn open_responses_proxy_request_with_settings(
     open_responses_proxy_request_with_settings_and_user_agent(body, settings, None).await
 }
 
-async fn open_responses_proxy_request_with_settings_and_user_agent(
+pub async fn open_responses_proxy_request_with_settings_and_user_agent(
     body: &str,
     settings: crate::settings::BackendSettings,
     original_user_agent: Option<&str>,
@@ -532,10 +532,10 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         );
         let upstream = match send_upstream_request_for_responses(
             upstream_request_builder(
-                crate::http_client::proxied_client(&effective_user_agent(
-                    &relay.user_agent,
-                    original_user_agent,
-                ))?,
+                crate::http_client::client_for_endpoint(
+                    &effective_user_agent(&relay.user_agent, original_user_agent),
+                    &endpoint,
+                )?,
                 &endpoint,
                 relay.api_key.trim(),
                 is_stream,
@@ -635,6 +635,13 @@ pub async fn open_models_proxy_request(
     original_user_agent: Option<&str>,
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let settings = SettingsStore::default().load().unwrap_or_default();
+    open_models_proxy_request_with_settings(settings, original_user_agent).await
+}
+
+pub async fn open_models_proxy_request_with_settings(
+    settings: crate::settings::BackendSettings,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
     let relay = crate::relay_rotation::select_relay_for_probe(&settings)?;
     validate_upstream(&relay)?;
 
@@ -649,10 +656,10 @@ pub async fn open_models_proxy_request(
         }),
     );
     let upstream = send_upstream_request(
-        crate::http_client::proxied_client(&effective_user_agent(
-            &relay.user_agent,
-            original_user_agent,
-        ))?
+        crate::http_client::client_for_endpoint(
+            &effective_user_agent(&relay.user_agent, original_user_agent),
+            &endpoint,
+        )?
         .get(endpoint)
         .bearer_auth(relay.api_key.trim()),
     )
@@ -679,6 +686,14 @@ pub async fn open_chat_completions_proxy_request(
     original_user_agent: Option<&str>,
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let settings = SettingsStore::default().load().unwrap_or_default();
+    open_chat_completions_proxy_request_with_settings(body, settings, original_user_agent).await
+}
+
+pub async fn open_chat_completions_proxy_request_with_settings(
+    body: &str,
+    settings: crate::settings::BackendSettings,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
     let relay = settings.active_relay_profile();
     if relay.protocol != RelayProtocol::ChatCompletions {
         anyhow::bail!("当前中转未启用 Chat Completions 协议代理");
@@ -695,11 +710,12 @@ pub async fn open_chat_completions_proxy_request(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let upstream = crate::http_client::proxied_client(&effective_user_agent(
-        &relay.user_agent,
-        original_user_agent,
-    ))?
-    .post(chat_completions_url(&relay.base_url))
+    let endpoint = chat_completions_url(&relay.base_url);
+    let upstream = crate::http_client::client_for_endpoint(
+        &effective_user_agent(&relay.user_agent, original_user_agent),
+        &endpoint,
+    )?
+    .post(endpoint)
     .bearer_auth(relay.api_key.trim())
     .header(reqwest::header::CONTENT_TYPE, "application/json")
     .json(&request_json)
