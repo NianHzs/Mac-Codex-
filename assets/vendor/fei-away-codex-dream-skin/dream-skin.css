@@ -1,0 +1,1545 @@
+:root.codex-dream-skin {
+  color-scheme: light;
+  --dream-accent: oklch(0.66 0.15 18);
+  --dream-accent-ink: oklch(0.98 0.006 20);
+  --dream-art-position: 72% 45%;
+  --dream-art-fit: cover;
+  --dream-art-backdrop-fit: cover;
+  --dream-canvas: color-mix(in oklab, oklch(0.975 0.006 35) 96%, var(--dream-accent));
+  --dream-surface: color-mix(in oklab, oklch(0.988 0.004 35) 97%, var(--dream-accent));
+  --dream-surface-raised: color-mix(in oklab, oklch(0.995 0.003 35) 98%, var(--dream-accent));
+  --dream-sidebar: color-mix(in oklab, oklch(0.965 0.006 35) 94%, var(--dream-accent));
+  --dream-text: oklch(0.25 0.018 30);
+  --dream-text-muted: oklch(0.48 0.018 30);
+  --dream-line: color-mix(in oklab, oklch(0.75 0.012 30) 80%, var(--dream-accent));
+  --dream-line-soft: color-mix(in oklab, transparent 76%, var(--dream-accent));
+  --dream-accent-soft: color-mix(in oklab, var(--dream-accent) 14%, var(--dream-surface));
+  --dream-accent-hover: color-mix(in oklab, var(--dream-accent) 20%, var(--dream-surface));
+  --dream-hero-shade: color-mix(in oklab, var(--dream-surface) 93%, transparent);
+  --dream-ambient-opacity: .18;
+  --dream-shadow: 0 16px 42px color-mix(in oklab, var(--dream-accent) 9%, transparent);
+  --dream-immersive-edge: color-mix(in oklab, var(--dream-surface) 46%, transparent);
+  --dream-immersive-mid: color-mix(in oklab, var(--dream-surface) 28%, transparent);
+  --dream-immersive-far: color-mix(in oklab, var(--dream-surface) 14%, transparent);
+  --dream-immersive-sidebar: color-mix(in oklab, var(--dream-sidebar) 50%, transparent);
+  --dream-task-immersive-sidebar: color-mix(in oklab, var(--dream-sidebar) 72%, transparent);
+  --dream-immersive-composer: color-mix(in oklab, var(--dream-surface-raised) 76%, var(--dream-accent) 4%);
+  --dream-immersive-line: color-mix(in oklab, var(--dream-line) 76%, transparent);
+  --dream-task-header-surface: color-mix(in oklab, oklch(0.24 0.035 25) 76%, var(--dream-accent) 24%);
+  --dream-task-header-text: #fff8f4;
+  --dream-task-composer-surface: color-mix(in oklab, var(--dream-surface-raised) 86%, var(--dream-accent) 14%);
+  /* Conversation pages need contrast without a pale veil that erases the art. */
+  --dream-task-immersive-edge: color-mix(in oklab, oklch(0.18 0.02 30) 34%, transparent);
+  --dream-task-immersive-mid: color-mix(in oklab, oklch(0.18 0.02 30) 22%, transparent);
+  --dream-task-immersive-far: color-mix(in oklab, oklch(0.18 0.02 30) 10%, transparent);
+  --dream-home-veil: 0%;
+  --dream-task-veil: 22%;
+  --dream-home-blur: 4px;
+  --dream-task-blur: 8px;
+}
+
+:root.codex-dream-skin.dream-theme-dark {
+  color-scheme: dark;
+  --dream-canvas: color-mix(in oklab, oklch(0.16 0.012 245) 96%, var(--dream-accent));
+  --dream-surface: color-mix(in oklab, oklch(0.19 0.012 245) 95%, var(--dream-accent));
+  --dream-surface-raised: color-mix(in oklab, oklch(0.23 0.012 245) 95%, var(--dream-accent));
+  --dream-sidebar: color-mix(in oklab, oklch(0.145 0.014 245) 94%, var(--dream-accent));
+  --dream-text: oklch(0.93 0.008 245);
+  --dream-text-muted: oklch(0.7 0.012 245);
+  --dream-line: color-mix(in oklab, oklch(0.42 0.018 245) 76%, var(--dream-accent));
+  --dream-line-soft: color-mix(in oklab, transparent 78%, var(--dream-accent));
+  --dream-accent-soft: color-mix(in oklab, var(--dream-accent) 18%, var(--dream-surface));
+  --dream-accent-hover: color-mix(in oklab, var(--dream-accent) 27%, var(--dream-surface));
+  --dream-hero-shade: color-mix(in oklab, var(--dream-surface) 91%, transparent);
+  --dream-ambient-opacity: .22;
+  --dream-shadow: 0 18px 48px color-mix(in oklab, oklch(0.06 0.01 245) 72%, transparent);
+  --dream-immersive-edge: color-mix(in oklab, var(--dream-surface) 43%, transparent);
+  --dream-immersive-mid: color-mix(in oklab, var(--dream-surface) 27%, transparent);
+  --dream-immersive-far: color-mix(in oklab, var(--dream-surface) 16%, transparent);
+  --dream-immersive-sidebar: color-mix(in oklab, var(--dream-sidebar) 48%, transparent);
+  --dream-task-immersive-sidebar: color-mix(in oklab, var(--dream-sidebar) 70%, transparent);
+  --dream-immersive-composer: color-mix(in oklab, var(--dream-surface-raised) 88%, var(--dream-accent) 5%);
+  --dream-immersive-line: color-mix(in oklab, var(--dream-line) 82%, transparent);
+  --dream-task-header-surface: color-mix(in oklab, oklch(0.24 0.035 25) 76%, var(--dream-accent) 24%);
+  --dream-task-header-text: #fff8f4;
+  --dream-task-composer-surface: color-mix(in oklab, var(--dream-surface-raised) 82%, var(--dream-accent) 18%);
+  --dream-task-immersive-edge: color-mix(in oklab, oklch(0.18 0.02 30) 42%, transparent);
+  --dream-task-immersive-mid: color-mix(in oklab, oklch(0.18 0.02 30) 30%, transparent);
+  --dream-task-immersive-far: color-mix(in oklab, oklch(0.18 0.02 30) 18%, transparent);
+}
+
+html.codex-dream-skin body {
+  background: var(--dream-canvas) !important;
+  color: var(--dream-text) !important;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel {
+  color: var(--dream-text) !important;
+  background: var(--dream-sidebar) !important;
+  border-color: var(--dream-line-soft) !important;
+  box-shadow: inset -1px 0 var(--dream-line-soft) !important;
+  backdrop-filter: none !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel nav {
+  background: transparent !important;
+}
+
+/* The workspace name and quick controls occupy a bright part of many custom
+   wallpapers. Give this native header a compact contrast layer without
+   turning the whole sidebar into a card. */
+html.codex-dream-skin aside.app-shell-left-panel > :first-child {
+  background: color-mix(in srgb, oklch(.16 .018 34) 62%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, white 18%, transparent) !important;
+  box-shadow: 0 4px 14px color-mix(in srgb, oklch(.1 .01 34) 22%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(.94) !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel > :first-child :is(button, [role="button"], [class*="text-"], svg, svg *) {
+  color: rgb(255 252 247 / .98) !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: 0 1px 3px rgb(0 0 0 / .72) !important;
+  opacity: 1 !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel button {
+  color: var(--dream-text) !important;
+  transition: background-color 180ms cubic-bezier(.22, 1, .36, 1), color 180ms cubic-bezier(.22, 1, .36, 1) !important;
+}
+
+/* Recent Codex builds give the collapsed-sidebar recovery control its own
+   pale text token.  Keep descendants tied to the button colour so controls
+   such as \"展开显示\" remain legible on every Dream Skin palette. */
+html.codex-dream-skin aside.app-shell-left-panel button :is(span, [class*="text-token"], [class*="text-"]) {
+  color: var(--dream-text) !important;
+  opacity: 1 !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel button:hover {
+  background: var(--dream-accent-soft) !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel [class~="bg-token-list-hover-background"],
+html.codex-dream-skin aside.app-shell-left-panel [aria-current="page"] {
+  color: var(--dream-text) !important;
+  background: var(--dream-accent-hover) !important;
+  box-shadow: inset 0 0 0 1px var(--dream-line-soft) !important;
+}
+
+html.codex-dream-skin aside.app-shell-left-panel svg,
+html.codex-dream-skin aside.app-shell-left-panel [class*="text-token"] {
+  color: currentColor;
+}
+
+html.codex-dream-skin main.main-surface {
+  position: relative;
+  isolation: isolate;
+  /* Codex's task rail is positioned just outside this surface. Clipping the
+     surface leaves an empty strip where the native task controls belong. */
+  overflow: visible !important;
+  color: var(--dream-text) !important;
+  background: var(--dream-surface) !important;
+  border-color: var(--dream-line-soft) !important;
+  box-shadow: inset 0 1px color-mix(in oklab, var(--dream-surface-raised) 72%, transparent) !important;
+}
+
+html.codex-dream-skin main.main-surface > header.app-header-tint {
+  /* Preserve Codex's native fixed header geometry and side-panel controls. */
+  color: var(--dream-text) !important;
+  background: color-mix(in srgb, var(--dream-sidebar) 88%, var(--dream-surface)) !important;
+  border-color: var(--dream-line-soft) !important;
+  backdrop-filter: blur(12px) saturate(1.05) !important;
+}
+
+/* Keep Codex's real right-side drawers (environment / in-app browser) above
+   the wallpaper. This deliberately restores native controls rather than
+   manufacturing a disconnected replacement sidebar. */
+html.codex-dream-skin main.main-surface > header.app-header-tint :is(
+  [aria-controls],
+  [aria-expanded],
+  [data-testid*="sidebar"],
+  [data-testid*="panel"],
+  [aria-label*="侧边栏"],
+  [aria-label*="side"]
+) {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 3 !important;
+}
+
+/* The application menu shares the title-bar strip with the native window
+   controls, but is outside main.main-surface in current Codex builds. */
+html.codex-dream-skin [class*="application-menu-top-bar"] {
+  color: var(--dream-text) !important;
+  background: color-mix(in srgb, var(--dream-sidebar) 88%, var(--dream-surface)) !important;
+  border-bottom: 1px solid var(--dream-line-soft) !important;
+  box-shadow: 0 1px 12px color-mix(in oklab, var(--dream-canvas) 56%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.05) !important;
+}
+
+html.codex-dream-skin [class*="application-menu-top-bar"] button,
+html.codex-dream-skin [class*="application-menu-top-bar"] svg {
+  color: var(--dream-text) !important;
+  text-shadow: 0 1px 2px color-mix(in oklab, var(--dream-canvas) 70%, transparent) !important;
+}
+
+html.codex-dream-skin.dream-theme-light [class*="application-menu-top-bar"] {
+  background: color-mix(in oklab, var(--dream-surface) 78%, transparent) !important;
+  border-bottom: 1px solid color-mix(in oklab, var(--dream-line) 68%, transparent) !important;
+  backdrop-filter: blur(14px) saturate(.94) !important;
+}
+
+html.codex-dream-skin.dream-theme-light [class*="application-menu-top-bar"] button,
+html.codex-dream-skin.dream-theme-light [class*="application-menu-top-bar"] svg {
+  color: oklch(.28 .035 78) !important;
+  text-shadow: 0 1px 0 color-mix(in oklab, white 72%, transparent) !important;
+}
+
+/* Codex 1.3.94 uses a literal utility class in some windows rather than the
+   older generated name. Keep its native menu readable without changing page
+   content foregrounds. */
+html.codex-dream-skin [class~="group/application-menu-top-bar"] {
+  color: var(--dream-text) !important;
+  background: color-mix(in srgb, var(--dream-sidebar) 88%, var(--dream-surface)) !important;
+  border-bottom: 1px solid var(--dream-line-soft) !important;
+  box-shadow: 0 1px 12px color-mix(in oklab, var(--dream-canvas) 56%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.05) !important;
+}
+
+html.codex-dream-skin [class~="group/application-menu-top-bar"] :is(button, [role="button"], svg, svg *) {
+  color: var(--dream-text) !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: 0 1px 2px color-mix(in oklab, var(--dream-canvas) 70%, transparent) !important;
+  opacity: 1 !important;
+}
+
+html.codex-dream-skin.dream-theme-light [class~="group/application-menu-top-bar"] button,
+html.codex-dream-skin.dream-theme-light [class~="group/application-menu-top-bar"] svg {
+  color: oklch(.28 .035 78) !important;
+  text-shadow: 0 1px 0 color-mix(in oklab, white 72%, transparent) !important;
+}
+
+html.codex-dream-skin [class*="application-menu-top-bar"] :is(button, [role="button"]),
+html.codex-dream-skin [data-tauri-drag-region] :is(button, [role="button"]) {
+  color: var(--dream-text) !important;
+  opacity: 1 !important;
+}
+
+html.codex-dream-skin [class*="application-menu-top-bar"] :is(svg, svg *),
+html.codex-dream-skin [data-tauri-drag-region] :is(svg, svg *) {
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
+html.codex-dream-skin [class*="application-menu-top-bar"] :is(button, [role="button"]):hover,
+html.codex-dream-skin [data-tauri-drag-region] :is(button, [role="button"]):hover {
+  background: var(--dream-accent-soft) !important;
+}
+
+/* Codex renders one navigation-row per task event. Painting every row creates
+   a dense segmented column, so the parent owns one continuous rail instead. */
+html.codex-dream-skin nav:has(button[class*="navigation-row"]) {
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+html.codex-dream-skin nav:has(button[class*="navigation-row"])::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  left: 12px;
+  width: 5px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, #F8D96C, #E2AA1E) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #D99E17 36%, transparent), 0 4px 12px color-mix(in srgb, #D99E17 22%, transparent);
+  pointer-events: none;
+}
+
+html.codex-dream-skin button[class*="navigation-row"] {
+  position: relative !important;
+  z-index: 1;
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html.codex-dream-skin [class*="navigation-row"] [class*="marker"] {
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  opacity: 0 !important;
+}
+
+html.codex-dream-skin button[class*="navigation-row"]:hover [class*="marker"],
+html.codex-dream-skin button[class*="navigation-row"]:focus-visible [class*="marker"],
+html.codex-dream-skin button[class*="navigation-row"]:has([class~="bg-token-foreground"]) [class*="marker"] {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 999px !important;
+  background: #D99E17 !important;
+  opacity: 1 !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #FFF3B5 74%, transparent), 0 2px 8px color-mix(in srgb, #C4860A 38%, transparent) !important;
+}
+
+html.codex-dream-skin [class*="navigation-row"]:hover,
+html.codex-dream-skin [class*="navigation-row"]:focus-visible {
+  background: var(--dream-accent-soft) !important;
+}
+
+#codex-dream-skin-chrome {
+  position: fixed !important;
+  top: var(--codework-dream-chrome-top, 6px);
+  left: var(--codework-dream-chrome-left, 50%);
+  right: auto;
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  display: flex !important;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 7px;
+  width: max-content;
+  /* Leave room for Codex's left app menu and Windows window controls. */
+  max-width: calc(100vw - 420px);
+  min-height: 28px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 1px solid color-mix(in oklab, var(--dream-line) 70%, transparent);
+  border-radius: 999px;
+  color: #111827;
+  background: color-mix(in oklab, var(--dream-surface-raised) 86%, transparent);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--dream-canvas) 28%, transparent);
+  font: 600 12px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+  letter-spacing: .01em;
+  /* This is now an interactive title-bar control, not a decorative badge. */
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+#codex-dream-skin-chrome > * {
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#codex-dream-skin-chrome .codework-dream-crown {
+  color: var(--dream-accent);
+  font-size: 15px;
+  line-height: 1;
+}
+
+#codex-dream-skin-chrome .codework-dream-version {
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in oklab, var(--dream-line) 72%, transparent);
+  color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
+
+#codex-dream-skin-chrome .codework-dream-tuning {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: 3px;
+  padding-left: 9px;
+  border-left: 1px solid color-mix(in oklab, var(--dream-line) 68%, transparent);
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+#codex-dream-skin-chrome .codework-dream-tuning label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4b5563;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#codex-dream-skin-chrome .codework-dream-tuning input[type="range"] {
+  width: 76px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--dream-accent);
+  cursor: ew-resize;
+  touch-action: none;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+#codex-dream-skin-chrome .codework-dream-tuning output {
+  min-width: 26px;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  #codex-dream-skin-chrome {
+    gap: 5px;
+    max-width: calc(100vw - 112px);
+  }
+
+  #codex-dream-skin-chrome > span:nth-of-type(2) {
+    display: none;
+  }
+
+  #codex-dream-skin-chrome .codework-dream-tuning {
+    gap: 5px;
+    margin-left: 0;
+    padding-left: 5px;
+  }
+
+  #codex-dream-skin-chrome .codework-dream-tuning input[type="range"] {
+    width: 52px;
+  }
+}
+
+html.codex-dream-skin [role="main"] {
+  color: var(--dream-text);
+}
+
+/* Task routes use the art as a quiet atmospheric layer. Wide banners are shown
+   at their natural width instead of being enlarged and center-cropped. */
+html.codex-dream-skin .dream-task {
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  background: var(--dream-surface) !important;
+}
+
+html.codex-dream-skin .dream-task::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--dream-ambient-opacity);
+  background-image: var(--dream-art);
+  background-repeat: no-repeat;
+  background-position: var(--dream-art-position);
+  background-size: cover;
+  mask-image: linear-gradient(to bottom, oklch(0 0 0) 0, oklch(0 0 0 / .92) 38%, transparent 88%);
+}
+
+html.codex-dream-skin.dream-art-wide .dream-task::before {
+  background-position: center top;
+  background-size: 100% auto;
+}
+
+html.codex-dream-skin.dream-art-wide:not(.dream-task-banner) .dream-task::before {
+  background-position: var(--dream-art-position);
+  background-size: cover;
+  mask-image: linear-gradient(to bottom, oklch(0 0 0) 0, oklch(0 0 0 / .92) 44%, oklch(0 0 0 / .72) 100%);
+}
+
+html.codex-dream-skin.dream-task-banner .dream-task::before {
+  bottom: auto;
+  height: min(46vh, 520px);
+  opacity: calc(var(--dream-ambient-opacity) * 1.8);
+  mask-image: linear-gradient(to bottom, oklch(0 0 0) 0, oklch(0 0 0 / .9) 52%, transparent 100%);
+}
+
+html.codex-dream-skin.dream-task-off .dream-task::before {
+  display: none;
+}
+
+html.codex-dream-skin .dream-task > :not(header.app-header-tint) {
+  position: relative;
+  z-index: 1;
+}
+
+html.codex-dream-skin .dream-task article,
+html.codex-dream-skin .dream-task [data-message-author-role] {
+  color: var(--dream-text);
+}
+
+/* The home route keeps the source image expressive, with a semantic safe-area
+   wash selected from image focus metadata. */
+html.codex-dream-skin .dream-home {
+  --thread-content-max-width: min(1180px, calc(100cqw - 56px)) !important;
+  overflow-x: hidden !important;
+  background: var(--dream-surface) !important;
+}
+
+.dream-home > div:first-child {
+  min-height: 100% !important;
+  padding-top: 24px !important;
+}
+
+.dream-home > div:first-child > div:first-child {
+  flex: 0 0 clamp(390px, 42cqw, 510px) !important;
+  min-height: 390px !important;
+  align-items: flex-start !important;
+  padding-bottom: 0 !important;
+}
+
+.dream-home > div:first-child > div:first-child > div:first-child {
+  position: relative !important;
+  isolation: isolate;
+  width: calc(100% - 56px) !important;
+  max-width: 1180px !important;
+  height: clamp(230px, 27cqw, 326px) !important;
+  min-height: 230px !important;
+  flex: 0 1 auto !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid var(--dream-line) !important;
+  border-radius: 20px !important;
+  background-image: var(--dream-art) !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
+  background-position: var(--dream-art-position) !important;
+  box-shadow: var(--dream-shadow) !important;
+}
+
+html.codex-dream-skin.dream-art-wide .dream-home > div:first-child > div:first-child > div:first-child {
+  background-size: cover !important;
+}
+
+.dream-home > div:first-child > div:first-child > div:first-child::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--dream-hero-shade) 0 32%, transparent 70%);
+}
+
+html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child::before {
+  background: linear-gradient(270deg, var(--dream-hero-shade) 0 32%, transparent 70%);
+}
+
+html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child::before {
+  background: radial-gradient(ellipse at center, var(--dream-hero-shade) 0 23%, transparent 72%);
+}
+
+html.codex-dream-skin.dream-safe-none .dream-home > div:first-child > div:first-child > div:first-child::before {
+  background: transparent;
+}
+
+.dream-home > div:first-child > div:first-child > div:first-child > div:first-child {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  height: 100%;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  padding: 30px 40px;
+}
+
+.dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+  width: min(48%, 520px) !important;
+  align-items: flex-start !important;
+  gap: 0 !important;
+}
+
+html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child > div:first-child {
+  justify-content: flex-end !important;
+}
+
+html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+  align-items: flex-end !important;
+  text-align: right !important;
+}
+
+html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child > div:first-child {
+  justify-content: center !important;
+}
+
+html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+  align-items: center !important;
+  text-align: center !important;
+}
+
+.dream-home [data-testid="home-icon"] {
+  display: none !important;
+}
+
+.dream-home [data-feature="game-source"] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: inherit !important;
+  justify-content: flex-start !important;
+  max-width: 100% !important;
+  color: var(--dream-text) !important;
+  font-size: 28px !important;
+  line-height: 1.25 !important;
+  font-weight: 720 !important;
+  text-align: inherit !important;
+  text-shadow: 0 1px 16px var(--dream-surface);
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.dream-home [data-feature="game-source"] button {
+  margin: 0 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--dream-line);
+  border-radius: 999px;
+  color: var(--dream-text) !important;
+  background: var(--dream-accent-soft) !important;
+  text-underline-offset: 4px;
+}
+
+.dream-home .group\/home-suggestions {
+  overflow: visible !important;
+}
+
+.dream-home .group\/home-suggestions button {
+  min-height: 112px !important;
+  padding: 16px 14px !important;
+  color: var(--dream-text) !important;
+  border: 1px solid var(--dream-line-soft) !important;
+  border-radius: 16px !important;
+  background: var(--dream-surface-raised) !important;
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--dream-accent) 6%, transparent) !important;
+  transition: transform 180ms cubic-bezier(.22, 1, .36, 1), border-color 180ms cubic-bezier(.22, 1, .36, 1), background-color 180ms cubic-bezier(.22, 1, .36, 1) !important;
+}
+
+.dream-home .group\/home-suggestions button:hover {
+  transform: translateY(-2px) !important;
+  border-color: var(--dream-line) !important;
+  background: var(--dream-accent-soft) !important;
+}
+
+.dream-home .group\/home-suggestions button > span:first-child > span:first-child {
+  width: 38px;
+  height: 38px;
+  display: grid !important;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--dream-accent-ink) !important;
+  background: var(--dream-accent) !important;
+  box-shadow: 0 0 0 6px var(--dream-accent-soft);
+}
+
+.dream-home .group\/home-suggestions button svg {
+  width: 20px !important;
+  height: 20px !important;
+  color: currentColor !important;
+}
+
+html.codex-dream-skin .composer-surface-chrome {
+  color: var(--dream-text) !important;
+  border: 1px solid var(--dream-line) !important;
+  border-radius: 18px !important;
+  background: color-mix(in oklab, var(--dream-surface-raised) 95%, transparent) !important;
+  box-shadow: 0 12px 34px color-mix(in oklab, var(--dream-accent) 8%, transparent) !important;
+  backdrop-filter: blur(14px) saturate(1.06) !important;
+}
+
+html.codex-dream-skin .ProseMirror {
+  color: var(--dream-text) !important;
+  caret-color: var(--dream-accent) !important;
+}
+
+html.codex-dream-skin button[class~="bg-token-foreground"] {
+  color: var(--dream-accent-ink) !important;
+  background: var(--dream-accent) !important;
+  box-shadow: none !important;
+}
+
+html.codex-dream-skin [data-message-author-role],
+html.codex-dream-skin article {
+  color: var(--dream-text);
+}
+
+/* A 16:9 or wider image is painted once on the native window. The sidebar,
+   title bar and route surface become coordinated readability layers instead
+   of repeating or cropping the image inside individual panels. */
+html.codex-dream-skin.dream-art-wide:has(main.main-surface.dream-home-shell) body,
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell)) body {
+  background-color: var(--dream-canvas) !important;
+  background-image: var(--dream-art) !important;
+  background-position: var(--dream-art-position) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* Narrow artwork (3:2, 4:3 and portrait) keeps its full composition. The
+   canvas colour fills the side space instead of enlarging and cropping it. */
+html.codex-dream-skin.dream-art-narrow {
+  --dream-art-fit: contain;
+  --dream-art-backdrop-fit: cover;
+}
+
+html.codex-dream-skin.dream-art-narrow:has(main.main-surface.dream-home-shell) body,
+html.codex-dream-skin.dream-art-narrow:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell)) body {
+  background-color: var(--dream-canvas) !important;
+  background-image: var(--dream-art) !important;
+  background-position: center center !important;
+  background-size: var(--dream-art-fit) !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+html.codex-dream-skin.dream-art-narrow:has(main.main-surface.dream-home-shell) aside.app-shell-left-panel,
+html.codex-dream-skin.dream-art-narrow:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell)) aside.app-shell-left-panel {
+  background: color-mix(in oklab, var(--dream-sidebar) 74%, transparent) !important;
+}
+
+html.codex-dream-skin.dream-art-narrow main.main-surface.dream-home-shell {
+  background: color-mix(in oklab, var(--dream-surface) var(--dream-home-veil), transparent) !important;
+  backdrop-filter: blur(var(--dream-home-blur)) !important;
+}
+
+html.codex-dream-skin.dream-art-narrow:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+  background: color-mix(in oklab, oklch(0.18 0.02 30) var(--dream-task-veil), transparent) !important;
+  backdrop-filter: blur(var(--dream-task-blur)) !important;
+}
+
+/* A local wallpaper is intentionally a full-canvas skin. Unlike curated 3:2
+   illustrations, it should fill the complete workspace rather than reserve
+   pale side gutters or place an opaque white surface above the artwork. */
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home body,
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task body {
+  background-color: var(--dream-canvas) !important;
+  background-image: var(--dream-art) !important;
+  background-position: var(--dream-art-position) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface,
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface [role="main"],
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface .dream-home {
+  background: transparent !important;
+  backdrop-filter: blur(var(--dream-home-blur)) saturate(1.03) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task main.main-surface {
+  /* The body owns the wallpaper. Painting it here as well caused the moving
+     layer and route surface to drift independently, producing ghosting. */
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide:has(main.main-surface.dream-home-shell)
+  aside.app-shell-left-panel,
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+  aside.app-shell-left-panel {
+  background: linear-gradient(90deg,
+    var(--dream-immersive-sidebar),
+    var(--dream-immersive-edge)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+  aside.app-shell-left-panel {
+  background: linear-gradient(90deg,
+    var(--dream-task-immersive-sidebar),
+    var(--dream-task-immersive-edge)) !important;
+}
+
+html.codex-dream-skin.dream-art-wide:has(main.main-surface.dream-home-shell)
+  aside.app-shell-left-panel::after,
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+  aside.app-shell-left-panel::after {
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface.dream-home-shell,
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+  background: linear-gradient(90deg,
+    var(--dream-immersive-edge),
+    var(--dream-immersive-mid) 64%,
+    var(--dream-immersive-far)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* The home canvas is presentation space. Let the artwork reach it directly;
+   route-specific task pages keep the readability veil above. */
+html.codex-dream-skin.dream-art-wide main.main-surface.dream-home-shell {
+  background: color-mix(in oklab, var(--dream-surface) var(--dream-home-veil), transparent) !important;
+  backdrop-filter: blur(var(--dream-home-blur)) !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+  background: color-mix(in oklab, oklch(0.18 0.02 30) var(--dream-task-veil), transparent) !important;
+  backdrop-filter: blur(var(--dream-task-blur)) !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task {
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task::before {
+  content: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface > header.app-header-tint {
+  color: var(--dream-task-header-text) !important;
+  background: var(--dream-task-header-surface) !important;
+  border-bottom: 1px solid var(--dream-immersive-line) !important;
+  box-shadow: 0 5px 18px color-mix(in oklab, var(--dream-canvas) 16%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.04) !important;
+  text-shadow: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface > header.app-header-tint :is(button, [role="button"], [class*="text-"], svg) {
+  color: var(--dream-task-header-text) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover main.main-surface > header.app-header-tint {
+  color: var(--dream-task-header-text) !important;
+  background: transparent !important;
+  border-bottom-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  text-shadow: 0 1px 3px color-mix(in oklab, oklch(0.12 0.02 25) 72%, transparent) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover main.main-surface > header.app-header-tint :is(button, [role="button"], [class*="text-"], svg) {
+  color: var(--dream-task-header-text) !important;
+  opacity: 1 !important;
+  text-shadow: inherit !important;
+  filter: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface [role="main"] {
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface.dream-home-shell
+  .dream-home > div:first-child > div:first-child > div:first-child {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface.dream-home-shell
+  .dream-home > div:first-child > div:first-child > div:first-child::before {
+  content: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface.dream-home-shell
+  .dream-home .group\/home-suggestions button {
+  background: color-mix(in oklab, var(--dream-surface-raised) 58%, transparent) !important;
+  box-shadow: 0 8px 22px color-mix(in oklab, var(--dream-canvas) 18%, transparent),
+    inset 0 0 0 1px var(--dream-immersive-line) !important;
+  backdrop-filter: blur(8px) saturate(1.04) !important;
+}
+
+/* The composer owns exactly one solid readability surface. Native bottom
+   gradients are cleared below so the control never appears double stacked. */
+html.codex-dream-skin.dream-art-wide .composer-surface-chrome {
+  color: var(--dream-text) !important;
+  background: var(--dream-task-composer-surface) !important;
+  border: 1px solid var(--dream-immersive-line) !important;
+  box-shadow: 0 10px 30px color-mix(in oklab, var(--dream-canvas) 20%, transparent),
+    inset 0 1px color-mix(in oklab, white 34%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.06) !important;
+}
+
+html.codex-dream-skin.dream-art-wide .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror) {
+  color: var(--dream-text) !important;
+  background: transparent !important;
+  text-shadow: none !important;
+}
+
+/* Keep the model selector, action icons and labels readable on pale artwork.
+   These controls often carry their own token colour, so inheriting the shell
+   foreground is not reliable. */
+html.codex-dream-skin .composer-surface-chrome :is(button, [role="button"], [class*="text-"], svg) {
+  color: var(--dream-text) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide .composer-surface-chrome::before {
+  content: none !important;
+}
+
+/* Current Codex builds render the home project picker in a hashed utility bar.
+   Merge it with the composer so the bottom control reads as one surface. */
+html.codex-dream-skin .dream-home-utility {
+  border: 1px solid var(--dream-line) !important;
+  border-bottom: 0 !important;
+  border-radius: 18px 18px 0 0 !important;
+  background: var(--dream-immersive-composer) !important;
+  box-shadow: none !important;
+}
+
+html.codex-dream-skin .dream-home:has(.dream-home-utility) .composer-surface-chrome {
+  border-radius: 0 0 18px 18px !important;
+  box-shadow: 0 10px 30px color-mix(in oklab, var(--dream-canvas) 20%, transparent),
+    inset 1px 0 var(--dream-immersive-line),
+    inset -1px 0 var(--dream-immersive-line),
+    inset 0 -1px var(--dream-immersive-line) !important;
+}
+
+/* Plugins, scheduled tasks and search routes ship opaque sticky wrappers.
+   Clear only full-window or sticky route chrome, leaving functional cards and
+   their hover states intact. */
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell) div.sticky:has(input[type="text"]),
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell) div.sticky:has(input[type="text"])::after {
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell) div.no-drag:has(> input[type="text"]) {
+  background: var(--dream-immersive-composer) !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px var(--dream-immersive-line) !important;
+  backdrop-filter: none !important;
+}
+
+html.codex-dream-skin.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell)
+  [class~="bg-token-main-surface-primary"][class~="h-full"][class~="w-full"] {
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface .app-shell-main-content-frame {
+  border-top: 0 !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface .app-shell-main-content-top-fade {
+  display: none !important;
+  background: transparent !important;
+}
+
+html.codex-dream-skin.dream-art-wide main.main-surface
+  .thread-scroll-container .bg-gradient-to-t.from-token-main-surface-primary {
+  background: transparent !important;
+}
+
+/* A user-uploaded wallpaper is a self-contained visual surface. These rules
+   deliberately come after the generic wide-art rules: the latter are designed
+   for curated presets and otherwise reintroduce a palette-tinted sidebar,
+   opaque task header, and a second reading veil over the original image. */
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide aside.app-shell-left-panel {
+  background: color-mix(in srgb, #111827 72%, transparent) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(18px) saturate(.94) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface,
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface [role="main"],
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface .dream-home,
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface .dream-task {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface .dream-task::before {
+  content: none !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide main.main-surface > header.app-header-tint,
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide [class*="application-menu-top-bar"] {
+  background: transparent !important;
+  border-bottom-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Tailwind's important utility declarations live in cascade layers. Important
+   skin corrections must join the earlier base layer to override them. */
+@layer base {
+  html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(
+    [class*="_markdownContent_"],
+    [class*="_markdownText_"],
+    [class*="_listItem_"],
+    [class*="_paragraph_"]
+  ) {
+    color: var(--dream-text) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: 0 1px 2px color-mix(in srgb, white 42%, transparent) !important;
+  }
+
+  html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(li, li::marker) {
+    color: var(--dream-text) !important;
+    -webkit-text-fill-color: currentColor !important;
+  }
+
+  html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(
+    [class*="group/activity-header"],
+    [class*="group/activity-header"] *,
+    [class*="text-token-conversation-body"],
+    [class*="text-token-conversation-body"] *,
+    [class*="text-token-conversation-summary"],
+    [class*="text-token-conversation-summary"] *
+  ) {
+    color: var(--dream-text-muted) !important;
+    -webkit-text-fill-color: currentColor !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(
+    .loading-shimmer-pure-text,
+    [class*="loading-shimmer"]
+  ) {
+    color: var(--dream-text-muted) !important;
+    -webkit-text-fill-color: currentColor !important;
+    background-image: none !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-theme-light body #root main.main-surface [class*="group/activity-header"] :is(svg, svg *) {
+    color: var(--dream-text-muted) !important;
+    stroke: currentColor !important;
+  }
+}
+
+
+/* WebKit text-fill fallback: native layered color utilities can still win the
+   computed color cascade, but they do not define a text fill. */
+html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(
+  [class*="_markdownContent_"],
+  [class*="_markdownContent_"] *,
+  [class*="_markdownText_"],
+  [class*="_listItem_"],
+  [class*="_paragraph_"],
+  li,
+  li::marker
+) {
+  -webkit-text-fill-color: var(--dream-text) !important;
+}
+
+html.codex-dream-skin.dream-theme-light body #root main.main-surface :is(
+  [class*="group/activity-header"],
+  [class*="group/activity-header"] *,
+  [class*="text-token-conversation-body"],
+  [class*="text-token-conversation-body"] *,
+  [class*="text-token-conversation-summary"],
+  [class*="text-token-conversation-summary"] *,
+  .loading-shimmer-pure-text,
+  [class*="loading-shimmer"]
+) {
+  -webkit-text-fill-color: var(--dream-text-muted) !important;
+}
+
+
+@media (min-width: 901px) {
+  html.codex-dream-skin main.main-surface .thread-scroll-container [class*="thread-content-max-width"] {
+    transform: translateX(20px);
+  }
+}
+
+/* Local wallpapers can be much lighter than the active Codex color scheme.
+   Keep this correction scoped to those measured pale images: normal dark,
+   Kitty and Crayon Shin-chan skins retain their original light foregrounds. */
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light {
+  --dream-light-wallpaper-foreground: rgb(48 37 43);
+  --dream-text: rgb(31 29 34);
+  --dream-text-muted: rgb(73 69 78);
+  --dream-task-header-text: rgb(31 29 34);
+  --dream-task-composer-surface: rgb(255 250 247 / .88);
+  --dream-immersive-composer: rgb(255 250 247 / .82);
+  --dream-immersive-line: rgb(89 79 92 / .28);
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light [class*="application-menu-top-bar"],
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light [class*="application-menu-top-bar"] :is(button, [role="button"], svg),
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light [data-tauri-drag-region] :is(button, [role="button"], svg),
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light main.main-surface :is(
+  [class*="text-token-conversation-summary"],
+  [class*="group/activity-header"],
+  .loading-shimmer-pure-text,
+  [class*="loading-shimmer"]
+) {
+  color: var(--dream-light-wallpaper-foreground) !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: 0 1px rgb(255 255 255 / .62) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light [data-tauri-drag-region] :is(button, [role="button"]):hover {
+  background: rgb(48 37 43 / .14) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light .composer-surface-chrome {
+  color: rgb(31 29 34) !important;
+  background: rgb(255 250 247 / .88) !important;
+  border-color: rgb(89 79 92 / .28) !important;
+  box-shadow: 0 12px 30px rgb(47 35 48 / .16), inset 0 1px rgb(255 255 255 / .72) !important;
+  backdrop-filter: blur(18px) saturate(1.04) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror) {
+  color: rgb(31 29 34) !important;
+  caret-color: rgb(31 29 34) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror)::placeholder {
+  color: rgb(73 69 78 / .72) !important;
+  opacity: 1 !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light .composer-surface-chrome :is(button, [role="button"], [class*="text-"], svg) {
+  color: rgb(53 48 58) !important;
+}
+
+/* Codework local contrast contract: preserve the bright Dream Skin body text
+   and add contrast only to transient activity/status rows.  This avoids a
+   second opaque card over the user's wallpaper. */
+@layer base {
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light {
+    --dream-content-foreground: rgb(255 255 255 / .96) !important;
+    --dream-content-shadow: 0 1px 3px rgb(0 0 0 / .78), 0 0 1px rgb(0 0 0 / .72);
+    --dream-status-surface: linear-gradient(90deg, rgb(14 17 24 / .64), rgb(14 17 24 / .34) 72%, transparent);
+    --dream-status-line: rgb(255 255 255 / .18);
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light body #root main.main-surface :is(
+    [class*="_markdownContent_"],
+    [class*="_markdownContent_"] *,
+    [class*="_markdownText_"],
+    [class*="_markdownText_"] *,
+    [class*="_listItem_"],
+    [class*="_paragraph_"]
+  ) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light body #root main.main-surface :is(li, li::marker) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light body #root main.main-surface li::marker {
+    color: rgb(255 244 198 / .98) !important;
+    text-shadow: 0 1px 3px rgb(0 0 0 / .86) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light body #root main.main-surface :is(
+    [class*="group/activity-header"],
+    [class*="text-token-conversation-summary"],
+    .loading-shimmer-pure-text,
+    [class*="loading-shimmer"]
+  ) {
+    display: inline-flex !important;
+    align-items: center !important;
+    width: fit-content !important;
+    max-width: min(100%, 620px) !important;
+    padding: 4px 10px !important;
+    border: 1px solid var(--dream-status-line) !important;
+    border-radius: 10px !important;
+    background: var(--dream-status-surface) !important;
+    box-shadow: 0 4px 14px rgb(0 0 0 / .14), inset 0 1px rgb(255 255 255 / .10) !important;
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light body #root main.main-surface :is(
+    [class*="group/activity-header"] *,
+    [class*="text-token-conversation-summary"] *,
+    .loading-shimmer-pure-text *,
+    [class*="loading-shimmer"] *
+  ) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover.dream-wallpaper-light {
+    --dream-art-fit: cover !important;
+  }
+}
+
+@media (max-width: 1120px) {
+  html.codex-dream-skin .dream-home {
+    --thread-content-max-width: min(940px, calc(100cqw - 36px)) !important;
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child {
+    width: calc(100% - 36px) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .dream-home > div:first-child {
+    padding-top: 16px !important;
+  }
+
+  .dream-home > div:first-child > div:first-child {
+    flex-basis: 370px !important;
+    min-height: 370px !important;
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child {
+    height: 220px !important;
+    min-height: 220px !important;
+    border-radius: 16px !important;
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child > div:first-child {
+    padding: 24px;
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+    width: 62% !important;
+  }
+
+  .dream-home [data-feature="game-source"] {
+    font-size: 22px !important;
+  }
+
+  .dream-home .group\/home-suggestions button {
+    min-height: 104px !important;
+    padding: 12px 10px !important;
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .dream-home > div:first-child > div:first-child > div:first-child::before,
+  html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child::before,
+  html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child::before {
+    background: color-mix(in oklab, var(--dream-surface) 78%, transparent);
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child > div:first-child,
+  html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child > div:first-child,
+  html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child > div:first-child {
+    justify-content: center !important;
+  }
+
+  .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child,
+  html.codex-dream-skin.dream-safe-right .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child,
+  html.codex-dream-skin.dream-safe-center .dream-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+    width: min(88%, 440px) !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+}
+
+html.codex-dream-skin.dream-motion-enabled body {
+  background-image: none !important;
+  isolation: isolate;
+}
+
+/* Custom wallpapers used to keep their full-canvas static paint because its
+   selector is more specific than the generic motion reset above.  That left a
+   still copy under the animated copy, which reads as a ghost image. */
+html.codex-dream-skin.dream-motion-enabled.dream-art-custom-cover body {
+  background-image: none !important;
+}
+
+#codework-dream-motion-layer {
+  position: fixed;
+  z-index: 0;
+  inset: -7%;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: .28;
+  background-image: var(--dream-art);
+  background-repeat: no-repeat;
+  background-position: var(--dream-art-position);
+  background-size: var(--dream-art-backdrop-fit, cover);
+  filter: saturate(1.06) contrast(1.02);
+  transform: translate3d(-1.8%, -1.2%, 0) scale(1.05);
+  transform-origin: center;
+  will-change: transform;
+  animation: codework-dream-wallpaper-drift 24s ease-in-out infinite alternate;
+}
+
+/* The moving image sits behind Codex's application tree.  Unlike a page-wide
+   animation, this leaves buttons, messages, and inputs completely still. */
+html.codex-dream-skin.dream-motion-enabled body > :not(#codework-dream-motion-layer, #codex-dream-skin-chrome) {
+  position: relative;
+  z-index: 1;
+}
+
+html.codex-dream-skin.dream-motion-enabled.dream-route-task main.main-surface,
+html.codex-dream-skin.dream-motion-enabled .dream-task::before,
+html.codex-dream-skin.dream-motion-enabled .dream-home > div:first-child > div:first-child > div:first-child {
+  background-image: none !important;
+}
+
+html.codex-dream-skin.dream-motion-paused #codework-dream-motion-layer {
+  animation-play-state: paused;
+}
+
+.codework-dream-motion-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.codework-dream-motion-control input {
+  margin: 0;
+  accent-color: var(--dream-accent);
+  cursor: pointer;
+}
+
+@keyframes codework-dream-wallpaper-drift {
+  0% {
+    transform: translate3d(-1.8%, -1.2%, 0) scale(1.05);
+  }
+
+  55% {
+    transform: translate3d(1.5%, -2.3%, 0) scale(1.085);
+  }
+
+  100% {
+    transform: translate3d(2.2%, 1.4%, 0) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #codework-dream-motion-layer {
+    animation: none !important;
+  }
+
+  html.codex-dream-skin *,
+  html.codex-dream-skin *::before,
+  html.codex-dream-skin *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* The native right drawer is rendered beside the content header, not inside
+   its header element in current Codex builds.  Give the real launcher its
+   own contrast surface so it remains visible on pale custom artwork. */
+html.codex-dream-skin.dream-art-custom-cover button[aria-label="显示/隐藏侧边栏"] {
+  color: rgb(31 41 55) !important;
+  background: color-mix(in srgb, white 72%, transparent) !important;
+  border: 1px solid rgb(31 41 55 / .16) !important;
+  box-shadow: 0 3px 10px rgb(15 23 42 / .18) !important;
+  backdrop-filter: blur(10px) saturate(1.04) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover button[aria-label="显示/隐藏侧边栏"]:hover {
+  color: rgb(15 23 42) !important;
+  background: rgb(255 255 255 / .9) !important;
+}
+
+/* Current Codex uses a hashed, case-sensitive application-menu class.  The
+   earlier lower-case selector misses it, leaving the real File/Edit/View menu
+   as pale text directly on the user's artwork. */
+html.codex-dream-skin.dream-art-custom-cover [class*="_ApplicationMenuTopBar_"] {
+  color: rgb(248 250 252) !important;
+  background: rgb(15 23 42 / .72) !important;
+  border-bottom: 1px solid rgb(255 255 255 / .16) !important;
+  box-shadow: 0 1px 14px rgb(15 23 42 / .18) !important;
+  backdrop-filter: blur(14px) saturate(1.04) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover [class*="_ApplicationMenuTopBar_"] :is(button, [role="menuitem"], svg) {
+  color: rgb(248 250 252 / .96) !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: 0 1px 3px rgb(0 0 0 / .72) !important;
+  opacity: 1 !important;
+}
+
+/* Keep the artwork present, but move the conversation onto one restrained
+   reading veil.  This is deliberately a full route surface rather than a
+   stack of pale cards, so white message text has consistent contrast while
+   the selected wallpaper still reads as the background. */
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide.dream-route-task:is(.dream-task-ambient, .dream-task-banner) main.main-surface,
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide.dream-route-task:is(.dream-task-ambient, .dream-task-banner) main.main-surface .dream-task {
+  background: linear-gradient(90deg, rgb(11 18 31 / .48), rgb(11 18 31 / .36) 56%, rgb(11 18 31 / .18)) !important;
+  backdrop-filter: blur(6px) saturate(.88) !important;
+}
+
+/* Match the task-route specificity of the legacy wide-art rules so a custom
+   picture never falls back to its pale, palette-tinted sidebar. */
+html.codex-dream-skin.dream-art-custom-cover.dream-art-wide.dream-route-task:is(.dream-task-ambient, .dream-task-banner) aside.app-shell-left-panel {
+  background: linear-gradient(180deg, rgb(15 23 42 / .76), rgb(15 23 42 / .64)) !important;
+  border-right: 1px solid rgb(255 255 255 / .12) !important;
+  box-shadow: 10px 0 28px rgb(15 23 42 / .12) !important;
+  backdrop-filter: blur(16px) saturate(.9) !important;
+}
+
+/* The composer is a purposeful dark-glass control, not a large white card
+   laid over the wallpaper.  Keep all typing and action controls luminous. */
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome {
+  color: rgb(248 250 252) !important;
+  background: linear-gradient(135deg, rgb(15 23 42 / .84), rgb(30 41 59 / .74)) !important;
+  border-color: rgb(255 255 255 / .18) !important;
+  box-shadow: 0 16px 34px rgb(15 23 42 / .24), inset 0 1px rgb(255 255 255 / .12) !important;
+  backdrop-filter: blur(18px) saturate(1.02) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror, button, [role="button"], [class*="text-"], svg) {
+  color: rgb(248 250 252 / .96) !important;
+  -webkit-text-fill-color: currentColor !important;
+  caret-color: rgb(248 250 252) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror)::placeholder {
+  color: rgb(226 232 240 / .68) !important;
+  opacity: 1 !important;
+}
+
+/* Codex briefly mounts a welcome surface before settling the initial route.
+   Do not blur a custom wallpaper for that transient frame: the blur toggling
+   was the visible home-screen flash while the stable chat view remained fine. */
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface,
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface [role="main"],
+html.codex-dream-skin.dream-art-custom-cover.dream-route-home main.main-surface .dream-home {
+  backdrop-filter: none !important;
+}
+
+/* Codex 1.3.9x puts its generated task header inside a main surface that is
+   already offset by the left navigation.  The header retained an additional
+   legacy 240px inline inset, which pushed its native right-drawer launcher
+   outside the viewport.  Clear that duplicated offset without replacing the
+   real drawer or touching the compact command-status rail. */
+html.codex-dream-skin main.main-surface > [class*="_Header_"] {
+  inset-inline-start: 0 !important;
+  margin-inline-start: 0 !important;
+  min-width: 0 !important;
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+/* Keep the conversation itself luminous on any user-selected artwork.  The
+   composer remains deliberately neutral; only the message and status canvas
+   uses the bright foreground treatment. */
+@layer base {
+  html.codex-dream-skin.dream-art-custom-cover {
+    --dream-content-foreground: rgb(255 255 255 / .96) !important;
+    --dream-content-shadow: 0 1px 3px rgb(0 0 0 / .78), 0 0 1px rgb(0 0 0 / .72);
+    --dream-status-surface: linear-gradient(90deg, rgb(14 17 24 / .64), rgb(14 17 24 / .34) 72%, transparent);
+    --dream-status-line: rgb(255 255 255 / .18);
+    --dream-text: var(--dream-content-foreground) !important;
+    --dream-text-muted: rgb(255 255 255 / .78) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover body #root main.main-surface :is(
+    [data-message-author-role],
+    [class*="text-token-conversation-body"],
+    [class*="_markdownContent_"],
+    [class*="_markdownContent_"] *,
+    [class*="_markdownText_"],
+    [class*="_markdownText_"] *,
+    [class*="_listItem_"],
+    [class*="_paragraph_"]
+  ) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover body #root main.main-surface :is(li, li::marker) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover body #root main.main-surface li::marker {
+    color: rgb(255 244 198 / .98) !important;
+    text-shadow: 0 1px 3px rgb(0 0 0 / .86) !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover body #root main.main-surface :is(
+    [class*="group/activity-header"],
+    [class*="text-token-conversation-summary"],
+    .loading-shimmer-pure-text,
+    [class*="loading-shimmer"]
+  ) {
+    display: inline-flex !important;
+    align-items: center !important;
+    width: fit-content !important;
+    max-width: min(100%, 620px) !important;
+    padding: 4px 10px !important;
+    border: 1px solid var(--dream-status-line) !important;
+    border-radius: 10px !important;
+    background: var(--dream-status-surface) !important;
+    box-shadow: 0 4px 14px rgb(0 0 0 / .14), inset 0 1px rgb(255 255 255 / .10) !important;
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover body #root main.main-surface :is(
+    [class*="group/activity-header"] *,
+    [class*="text-token-conversation-summary"] *,
+    .loading-shimmer-pure-text *,
+    [class*="loading-shimmer"] *
+  ) {
+    color: var(--dream-content-foreground) !important;
+    -webkit-text-fill-color: currentColor !important;
+    text-shadow: var(--dream-content-shadow) !important;
+    opacity: 1 !important;
+  }
+
+  html.codex-dream-skin.dream-art-custom-cover .composer-surface-chrome :is(
+    textarea,
+    [contenteditable="true"],
+    [contenteditable=""],
+    .ProseMirror
+  ) {
+    color: rgb(248 250 252 / .96) !important;
+    -webkit-text-fill-color: currentColor !important;
+    caret-color: rgb(248 250 252) !important;
+    text-shadow: 0 1px 2px rgb(0 0 0 / .48) !important;
+  }
+}
+
+/* Final route overrides: these intentionally follow the legacy light-wallpaper
+   layer so current Codex class specificity cannot bring back pale controls. */
+html.codex-dream-skin.dream-art-custom-cover button[aria-pressed] {
+  color: rgb(31 41 55) !important;
+  background: color-mix(in srgb, white 72%, transparent) !important;
+  border: 1px solid rgb(31 41 55 / .16) !important;
+  box-shadow: 0 3px 10px rgb(15 23 42 / .18) !important;
+  backdrop-filter: blur(10px) saturate(1.04) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task:is(.dream-task-ambient, .dream-task-banner) main.main-surface,
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task:is(.dream-task-ambient, .dream-task-banner) main.main-surface .dream-task {
+  background: linear-gradient(90deg, rgb(11 18 31 / .48), rgb(11 18 31 / .36) 56%, rgb(11 18 31 / .18)) !important;
+  backdrop-filter: blur(6px) saturate(.88) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task:is(.dream-task-ambient, .dream-task-banner) aside.app-shell-left-panel {
+  background: linear-gradient(180deg, rgb(15 23 42 / .76), rgb(15 23 42 / .64)) !important;
+  border-right: 1px solid rgb(255 255 255 / .12) !important;
+  box-shadow: 10px 0 28px rgb(15 23 42 / .12) !important;
+  backdrop-filter: blur(16px) saturate(.9) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome {
+  color: rgb(248 250 252) !important;
+  background: linear-gradient(135deg, rgb(15 23 42 / .84), rgb(30 41 59 / .74)) !important;
+  border-color: rgb(255 255 255 / .18) !important;
+  box-shadow: 0 16px 34px rgb(15 23 42 / .24), inset 0 1px rgb(255 255 255 / .12) !important;
+  backdrop-filter: blur(18px) saturate(1.02) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror, button, [role="button"], [class*="text-"], svg) {
+  color: rgb(248 250 252 / .96) !important;
+  -webkit-text-fill-color: currentColor !important;
+  caret-color: rgb(248 250 252) !important;
+}
+
+html.codex-dream-skin.dream-art-custom-cover.dream-route-task .composer-surface-chrome :is(textarea, [contenteditable="true"], [contenteditable=""], .ProseMirror)::placeholder {
+  color: rgb(226 232 240 / .68) !important;
+  opacity: 1 !important;
+}

@@ -331,7 +331,7 @@
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
   const codexServiceTierRequestOverrideVersion = "3";
   const codexAppServerModelRequestPatchVersion = "1";
-  const codexPluginMarketplaceUnlockVersion = "12";
+  const codexPluginMarketplaceUnlockVersion = "13";
   const codexPluginAutoExpandVersion = "1";
   const codexPluginAutoExpandMaxClicks = 80;
   const codexPluginAutoExpandClickDelayMs = 90;
@@ -345,6 +345,7 @@
   const codexThreadScrollListenerVersion = "4";
   const codexThreadScrollUserIntentVersion = "dispatcher:2";
   const codexPlusImageOverlayId = "codex-plus-image-overlay";
+  let codexPlusLocalImagePromise = null;
   window.__codexProjectMoveRuntimeId = (window.__codexProjectMoveRuntimeId || 0) + 1;
   const codexProjectMoveRuntimeId = window.__codexProjectMoveRuntimeId;
   clearTimeout(window.__codexProjectMoveProjectionTimer);
@@ -359,17 +360,69 @@
   window.__codexThreadScrollSyncTimers = [];
   window.__codexThreadScrollRestoreRevision = (window.__codexThreadScrollRestoreRevision || 0) + 1;
 
-  function installCodexPlusImageOverlay() {
+  function releaseCodexPlusLocalImageAsset() {
+    if (window.__codexPlusImageOverlayBlobUrl) {
+      URL.revokeObjectURL(window.__codexPlusImageOverlayBlobUrl);
+      window.__codexPlusImageOverlayBlobUrl = "";
+    }
+    codexPlusLocalImagePromise = null;
+  }
+
+  function loadCodexPlusLocalImageAsset() {
+    const config = window.__CODEX_PLUS_IMAGE_OVERLAY__ || {};
+    if (!config.enabled) {
+      return Promise.reject(new Error("本地壁纸未启用"));
+    }
+    if (typeof window.__codexSessionDeleteBridge !== "function") {
+      return Promise.reject(new Error("本地壁纸桥接服务未连接"));
+    }
+    if (window.__codexPlusImageOverlayBlobUrl) return Promise.resolve(window.__codexPlusImageOverlayBlobUrl);
+    if (codexPlusLocalImagePromise) return codexPlusLocalImagePromise;
+    codexPlusLocalImagePromise = window.__codexSessionDeleteBridge("/overlay/image-data", {})
+      .then((result) => {
+        const type = String(result?.contentType || "").toLowerCase();
+        const dataUri = typeof result?.dataUri === "string" ? result.dataUri : "";
+        if (result?.status !== "ok") throw new Error(result?.message || "本地壁纸读取失败");
+        if (!["image/png", "image/jpeg", "image/webp"].includes(type)) throw new Error("本地壁纸格式不受支持");
+        const prefix = `data:${type};base64,`;
+        if (!dataUri.startsWith(prefix)) throw new Error("本地壁纸数据无效");
+        const binary = atob(dataUri.slice(prefix.length));
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        return new Blob([bytes], { type });
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        window.__codexPlusImageOverlayBlobUrl = url;
+        return url;
+      })
+      .catch((error) => {
+        codexPlusLocalImagePromise = null;
+        throw error;
+      });
+    return codexPlusLocalImagePromise;
+  }
+
+  async function installCodexPlusImageOverlay() {
     const config = window.__CODEX_PLUS_IMAGE_OVERLAY__ || {};
     const canQueryById = typeof document?.getElementById === "function";
     const existing = canQueryById ? document.getElementById(codexPlusImageOverlayId) : null;
-    const source = config.dataUrl || "";
-    if (!config.enabled || !source) {
-      if (window.__codexPlusImageOverlayBlobUrl) {
-        URL.revokeObjectURL(window.__codexPlusImageOverlayBlobUrl);
-        window.__codexPlusImageOverlayBlobUrl = "";
-      }
+    if (!config.enabled) {
+      releaseCodexPlusLocalImageAsset();
       if (existing) existing.remove();
+      return;
+    }
+    if (window.__CODEWORK_DREAM_SKIN_PAYLOAD__?.enabled === true
+      && window.__CODEWORK_DREAM_SKIN_PAYLOAD__?.themeId === "custom-dream-skin") {
+      if (existing) existing.remove();
+      return;
+    }
+    let source;
+    try {
+      source = await loadCodexPlusLocalImageAsset();
+    } catch (error) {
+      if (existing) existing.remove();
+      sendCodexPlusDiagnostic("image_overlay_load_failed", { message: String(error?.message || error || "本地壁纸读取失败") });
       return;
     }
     const root = document?.documentElement;
@@ -409,7 +462,7 @@
     sendCodexPlusDiagnostic("image_overlay_installed", {
       opacity,
       fitMode,
-      sourceKind: source.startsWith("data:") ? "data-uri" : "unknown",
+      sourceKind: source.startsWith("blob:") ? "blob-url" : "unknown",
     });
   }
 
@@ -418,11 +471,15 @@
       document.addEventListener("DOMContentLoaded", installCodexPlusImageOverlay, { once: true });
       return;
     }
-    installCodexPlusImageOverlay();
-    setTimeout(installCodexPlusImageOverlay, 250);
+    void installCodexPlusImageOverlay();
+    setTimeout(() => void installCodexPlusImageOverlay(), 250);
   }
 
   scheduleCodexPlusImageOverlay();
+  if (!window.__codexPlusLocalImageUnloadInstalled && typeof window.addEventListener === "function") {
+    window.__codexPlusLocalImageUnloadInstalled = true;
+    window.addEventListener("beforeunload", releaseCodexPlusLocalImageAsset, { once: true });
+  }
   window.__codexThreadScrollSyncRevision = (window.__codexThreadScrollSyncRevision || 0) + 1;
   let upstreamBranchDefaultsCache = new Map();
   const upstreamBranchDefaultsCacheTtlMs = 5000;
@@ -1227,8 +1284,8 @@
     "warm-paper": { background: "#F4EBDD", surface: "#FFF9F0", accent: "#B66A3C", border: "#D7BFA5", text: "#3C2B20", radius: 12, fontScale: 1.05 },
   };
   const codeworkVisualThemeTokenKeys = ["background", "surface", "accent", "border", "text", "radius", "fontScale"];
-  const codeworkVisualThemeItemKeys = ["id", "name", "detail", "tier", "version", "tokens"];
-  const codeworkVisualThemeManifestKeys = ["version", "updatedAt", "themes"];
+  const codeworkVisualThemeItemKeys = ["id", "name", "detail", "tier", "version", "revision", "sha256", "assetBytes", "access", "cssProfile", "previewAsset", "heroAsset", "art", "tokens"];
+  const codeworkVisualThemeManifestKeys = ["version", "updatedAt", "authorizationExpiresAt", "themes", "allowedThemeIds"];
   let codeworkVisualThemeRequestId = 0;
   let codeworkVisualThemeAbortController = null;
   window.clearInterval(window.__codeworkVisualThemePollTimer);
@@ -1248,16 +1305,29 @@
   function isSafeCodeworkThemeVersion(value) {
     return typeof value === "string" && /^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$/.test(value);
   }
+  function isSafeCodeworkThemeSha256(value) {
+    return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+  }
   function isSafeCodeworkThemeManifest(value) {
     if (!isCodeworkVisualThemeObject(value) || !codeworkVisualThemeHasOnlyKeys(value, codeworkVisualThemeManifestKeys)) return false;
     if (!isSafeCodeworkThemeVersion(value.version) || !Array.isArray(value.themes)) return false;
     if (value.updatedAt !== undefined && !isSafeCodeworkThemeText(value.updatedAt)) return false;
+    if (value.authorizationExpiresAt !== undefined && (typeof value.authorizationExpiresAt !== "string" || Number.isNaN(Date.parse(value.authorizationExpiresAt)))) return false;
+    if (value.allowedThemeIds !== undefined && (!Array.isArray(value.allowedThemeIds) || !value.allowedThemeIds.every((id) => typeof id === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(id)))) return false;
     return value.themes.every((theme) => {
       if (!isCodeworkVisualThemeObject(theme) || !codeworkVisualThemeHasOnlyKeys(theme, codeworkVisualThemeItemKeys)) return false;
       if (typeof theme.id !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(theme.id)) return false;
       if (!isSafeCodeworkThemeText(theme.name)) return false;
       if (theme.detail !== undefined && !isSafeCodeworkThemeText(theme.detail)) return false;
       if (theme.tier !== "pro" || !isSafeCodeworkThemeVersion(theme.version)) return false;
+      if (theme.access !== undefined && theme.access !== "public" && theme.access !== "restricted") return false;
+      if (theme.cssProfile !== undefined && theme.cssProfile !== "character-hero-light" && theme.cssProfile !== "dream-skin-light") return false;
+      if (theme.previewAsset !== undefined && !isSafeCodeworkThemeAssetName(theme.previewAsset)) return false;
+      if (theme.heroAsset !== undefined && !isSafeCodeworkThemeAssetName(theme.heroAsset)) return false;
+      if (theme.revision !== undefined && !isSafeCodeworkThemeVersion(theme.revision)) return false;
+      if (theme.sha256 !== undefined && !isSafeCodeworkThemeSha256(theme.sha256)) return false;
+      if (theme.assetBytes !== undefined && (!Number.isInteger(theme.assetBytes) || typeof theme.assetBytes !== "number" || theme.assetBytes < 0 || theme.assetBytes > 16 * 1024 * 1024)) return false;
+      if (theme.art !== undefined && !isSafeCodeworkDreamSkinArt(theme.art)) return false;
       if (!isCodeworkVisualThemeObject(theme.tokens) || !codeworkVisualThemeHasOnlyKeys(theme.tokens, codeworkVisualThemeTokenKeys)) return false;
       const tokens = theme.tokens;
       return [tokens.background, tokens.surface, tokens.accent, tokens.border, tokens.text]
@@ -1266,24 +1336,22 @@
         && typeof tokens.fontScale === "number" && Number.isFinite(tokens.fontScale) && tokens.fontScale >= 0.8 && tokens.fontScale <= 1.3;
     });
   }
-  function normalizeCodeworkVisualThemeServiceUrl(value) {
-    if (typeof value !== "string" || !value.trim()) return null;
-    try {
-      const parsed = new URL(value.trim());
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-      parsed.hash = "";
-      parsed.search = "";
-      parsed.username = "";
-      parsed.password = "";
-      return `${parsed.protocol}//${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`;
-    } catch (_) {
-      return null;
-    }
+  function isSafeCodeworkThemeAssetName(value) {
+    return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{0,127}\.(?:png|jpe?g|webp)$/i.test(value);
+  }
+  function isSafeCodeworkDreamSkinArt(value) {
+    return isCodeworkVisualThemeObject(value)
+      && Number.isFinite(value.focusX) && value.focusX >= 0 && value.focusX <= 1
+      && Number.isFinite(value.focusY) && value.focusY >= 0 && value.focusY <= 1
+      && ["left", "right", "center", "none"].includes(value.safeArea)
+      && ["ambient", "banner", "off"].includes(value.taskMode)
+      && (value.layout === undefined || ["auto", "card", "immersive"].includes(value.layout))
+      && codeworkVisualThemeHasOnlyKeys(value, ["focusX", "focusY", "safeArea", "taskMode", "layout"]);
   }
   function codeworkVisualThemeCssFromTokens(tokens) {
-    return `:root{--codework-theme-background:${tokens.background};--codework-theme-surface:${tokens.surface};--codework-theme-accent:${tokens.accent};--codework-theme-border:${tokens.border};--codework-theme-text:${tokens.text};--codework-theme-radius:${tokens.radius}px;--codework-theme-font-scale:${tokens.fontScale}}html,body{background-color:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important;font-size:calc(100% * var(--codework-theme-font-scale))!important}#root{background-color:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important}aside,[role="navigation"],[role="dialog"]{background-color:var(--codework-theme-surface)!important;border-color:var(--codework-theme-border)!important;color:var(--codework-theme-text)!important}aside *{color:var(--codework-theme-text)!important}aside svg{color:currentColor!important}textarea{background-color:var(--codework-theme-surface)!important;color:var(--codework-theme-text)!important;border-color:var(--codework-theme-border)!important}a{color:var(--codework-theme-accent)!important}`;
+    return `:root{--codework-theme-background:${tokens.background};--codework-theme-surface:${tokens.surface};--codework-theme-accent:${tokens.accent};--codework-theme-border:${tokens.border};--codework-theme-text:${tokens.text};--codework-theme-radius:${tokens.radius}px;--codework-theme-font-scale:${tokens.fontScale}}[data-codework-theme-scope]{position:relative;isolation:isolate;background-color:var(--codework-theme-background)!important;color:var(--codework-theme-text)!important;font-size:calc(100% * var(--codework-theme-font-scale))!important}[data-codework-theme-scope] textarea,[data-codework-theme-scope] [contenteditable="true"]{background-color:var(--codework-theme-surface)!important;color:var(--codework-theme-text)!important;border-color:var(--codework-theme-border)!important}[data-codework-theme-scope] a{color:var(--codework-theme-accent)!important}`;
   }
-  function setCodeworkVisualThemeTokens(tokens) {
+  function setCodeworkBaseThemeTokens(tokens) {
     const id = "codework-visual-theme-style";
     const existing = document.getElementById(id);
     if (!tokens) { existing?.remove(); return; }
@@ -1292,10 +1360,409 @@
     style.textContent = codeworkVisualThemeCssFromTokens(tokens);
     if (!existing) document.documentElement.appendChild(style);
   }
+  const codeworkThemeAssetCache = new Map();
+  function loadCodeworkThemeAsset(assetName) {
+    if (!isSafeCodeworkThemeAssetName(assetName)) return Promise.reject(new Error("theme asset name is invalid"));
+    if (codeworkThemeAssetCache.has(assetName)) return codeworkThemeAssetCache.get(assetName);
+    if (typeof window.__codexSessionDeleteBridge !== "function") return Promise.reject(new Error("theme bridge is unavailable"));
+    const request = window.__codexSessionDeleteBridge("/theme/assets", { assetName })
+      .then((result) => {
+        const dataUri = typeof result?.dataUri === "string" ? result.dataUri : "";
+        if (!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(dataUri)) throw new Error("theme asset response is invalid");
+        return dataUri;
+      })
+      .catch((error) => {
+        codeworkThemeAssetCache.delete(assetName);
+        throw error;
+      });
+    codeworkThemeAssetCache.set(assetName, request);
+    return request;
+  }
+  function isCodeworkCharacterTheme(theme) {
+    return theme?.cssProfile === "character-hero-light" && isSafeCodeworkThemeAssetName(theme.heroAsset);
+  }
+  function isCodeworkConversationRoute() {
+    return /\/(?:c|chat|thread|threads|conversation)(?:\/|$)/i.test(location.pathname)
+      || Boolean(document.querySelector('[data-testid*="conversation"], [data-testid*="chat-history"], [data-testid*="thread"]'));
+  }
+  function findCodeworkThemeScope() {
+    const candidates = Array.from(document.querySelectorAll("main,[role=main]"))
+      .filter((element) => element instanceof HTMLElement && !element.closest("aside,[role=navigation]"));
+    return candidates.find((element) => element.querySelector("[data-testid*=conversation],[data-testid*=chat-history],[data-testid*=thread]"))
+      || candidates[0]
+      || null;
+  }
+  function setCodeworkThemeScope() {
+    const scope = findCodeworkThemeScope();
+    document.querySelectorAll("[data-codework-theme-scope]").forEach((element) => {
+      if (element !== scope) element.removeAttribute("data-codework-theme-scope");
+    });
+    if (scope) scope.setAttribute("data-codework-theme-scope", "true");
+    return scope;
+  }
+  function clearCodeworkThemeScope() {
+    document.querySelectorAll("[data-codework-theme-scope]").forEach((element) => element.removeAttribute("data-codework-theme-scope"));
+  }
+  function isCodeworkDreamSkinTheme(theme) {
+    return theme?.cssProfile === "dream-skin-light"
+      && isSafeCodeworkThemeAssetName(theme.heroAsset)
+      && isSafeCodeworkDreamSkinArt(theme.art);
+  }
+  const codeworkCuratedDreamSkinIds = new Set(["hello-kitty-christmas", "shinchan-energy", "hello-kitty-cloud-dream"]);
+  // Legacy renderer retained temporarily for migration diagnostics only.  It is
+  // deliberately never called: active Dream Skin sessions use the vendored
+  // Fei-Away runtime below.
+  function legacyCodeworkDreamSkinCss(theme) {
+    const art = theme.art;
+    const safeWash = art.safeArea === "right"
+      ? "linear-gradient(270deg,color-mix(in srgb,var(--codework-dream-surface) 92%,transparent) 0 34%,transparent 72%)"
+      : art.safeArea === "center"
+        ? "radial-gradient(ellipse at center,color-mix(in srgb,var(--codework-dream-surface) 90%,transparent) 0 24%,transparent 70%)"
+        : art.safeArea === "none"
+          ? "transparent"
+          : "linear-gradient(90deg,color-mix(in srgb,var(--codework-dream-surface) 92%,transparent) 0 34%,transparent 72%)";
+    return `:root[data-codework-dream-skin="${theme.id}"]{--codework-dream-canvas:${theme.tokens.background};--codework-dream-surface:${theme.tokens.surface};--codework-dream-accent:${theme.tokens.accent};--codework-dream-border:${theme.tokens.border};--codework-dream-text:${theme.tokens.text};--codework-dream-art:none;--codework-dream-position:${Math.round(art.focusX * 100)}% ${Math.round(art.focusY * 100)}%;--codework-dream-home-wash:${safeWash}}html.codework-dream-skin,html.codework-dream-skin body{background-color:var(--codework-dream-canvas)!important;background-image:var(--codework-dream-art)!important;background-position:var(--codework-dream-position)!important;background-size:cover!important;background-repeat:no-repeat!important;background-attachment:fixed!important;color:var(--codework-dream-text)!important}html.codework-dream-skin aside.app-shell-left-panel,html.codework-dream-skin aside[role="navigation"]{position:relative!important;background:linear-gradient(90deg,color-mix(in srgb,var(--codework-dream-surface) 88%,transparent),color-mix(in srgb,var(--codework-dream-surface) 48%,transparent))!important;color:var(--codework-dream-text)!important;border-color:color-mix(in srgb,var(--codework-dream-border) 70%,transparent)!important;backdrop-filter:blur(14px) saturate(1.04)!important}html.codework-dream-skin main.main-surface,html.codework-dream-skin main[role="main"]{position:relative!important;isolation:isolate!important;background:linear-gradient(90deg,color-mix(in srgb,var(--codework-dream-surface) 72%,transparent),color-mix(in srgb,var(--codework-dream-surface) 42%,transparent) 66%,color-mix(in srgb,var(--codework-dream-surface) 22%,transparent))!important;color:var(--codework-dream-text)!important}html.codework-dream-skin [data-codework-dream-home="true"]{position:relative!important;isolation:isolate!important}html.codework-dream-skin [data-codework-dream-home="true"]::before{content:"";position:absolute;z-index:0;inset:24px 28px auto;height:clamp(230px,27vw,326px);border:1px solid var(--codework-dream-border);border-radius:20px;background-image:var(--codework-dream-home-wash),var(--codework-dream-art);background-position:center,var(--codework-dream-position);background-size:cover,cover;background-repeat:no-repeat;box-shadow:0 16px 42px color-mix(in srgb,var(--codework-dream-accent) 12%,transparent);pointer-events:none}html.codework-dream-skin [data-codework-dream-home="true"]>*{position:relative;z-index:1}html.codework-dream-skin [data-codework-dream-home="true"] button,html.codework-dream-skin .composer-surface-chrome{border-color:color-mix(in srgb,var(--codework-dream-border) 82%,transparent)!important;background:color-mix(in srgb,var(--codework-dream-surface) 92%,transparent)!important;color:var(--codework-dream-text)!important;border-radius:${theme.tokens.radius}px!important;box-shadow:0 12px 30px color-mix(in srgb,var(--codework-dream-accent) 10%,transparent)!important;backdrop-filter:blur(14px) saturate(1.04)!important}html.codework-dream-skin [data-codework-dream-home="true"] button:hover{background:color-mix(in srgb,var(--codework-dream-accent) 13%,var(--codework-dream-surface))!important}html.codework-dream-skin textarea,html.codework-dream-skin [contenteditable="true"]{background:color-mix(in srgb,var(--codework-dream-surface) 94%,transparent)!important;border-color:var(--codework-dream-border)!important;color:var(--codework-dream-text)!important}html.codework-dream-skin a{color:var(--codework-dream-accent)!important}`;
+  }
+  function setCodeworkDreamSkinStyle(theme) {
+    // Kept as a compatibility no-op for old bridge calls. The pinned Dream Skin
+    // renderer below is the sole owner of Codex page styling.
+    void theme;
+  }
+  function findCodeworkDreamSkinHome() {
+    return document.querySelector('[role="main"]:has([data-testid="home-icon"])')
+      || document.querySelector('main.main-surface [data-testid="home-icon"]')?.closest('[role="main"],main')
+      || (() => {
+        const shellMain = document.querySelector("main.main-surface");
+        return shellMain && !shellMain.querySelector("[data-message-author-role], .thread-scroll-container")
+          ? shellMain
+          : null;
+      })()
+      || null;
+  }
+  function findCodeworkDreamSkinWelcomeSurface() {
+    // Codex's project-start screen is not wrapped in role=main.  The icon is
+    // stable, while this parent is the visible welcome-card surface.
+    const icon = document.querySelector('main.main-surface [data-testid="home-icon"]');
+    const surface = icon?.parentElement?.parentElement;
+    return surface instanceof HTMLElement && surface.contains(icon) ? surface : null;
+  }
+  function renderCodeworkDreamSkin() {
+    const state = window.__codeworkDreamSkinState;
+    if (!state || !document.documentElement) return;
+    const home = findCodeworkDreamSkinHome();
+    const welcomeSurface = findCodeworkDreamSkinWelcomeSurface();
+    const taskCandidates = [...document.querySelectorAll('[role="main"]')];
+    const shellMain = document.querySelector("main.main-surface");
+    for (const candidate of taskCandidates) {
+      candidate.classList.toggle("dream-home", candidate === home);
+      candidate.classList.toggle("dream-task", candidate !== home);
+    }
+    if (home && !taskCandidates.includes(home)) home.classList.add("dream-home");
+    shellMain?.classList.toggle("dream-home-shell", Boolean(home));
+    shellMain?.classList.toggle("dream-task", !home && taskCandidates.length === 0);
+    document.querySelectorAll("[data-codework-dream-home]").forEach((node) => {
+      if (node !== home) node.removeAttribute("data-codework-dream-home");
+    });
+    home?.setAttribute("data-codework-dream-home", "true");
+    document.querySelectorAll("[data-codework-dream-welcome]").forEach((node) => {
+      if (node !== welcomeSurface) node.removeAttribute("data-codework-dream-welcome");
+    });
+    welcomeSurface?.setAttribute("data-codework-dream-welcome", "true");
+    const artRequest = state.dataUri ? Promise.resolve(state.dataUri) : loadCodeworkThemeAsset(state.heroAsset);
+    void artRequest.then((dataUri) => {
+      if (window.__codeworkDreamSkinState?.revision !== state.revision) return;
+      document.documentElement.style.setProperty("--codework-dream-art", `url("${dataUri}")`);
+    }).catch(() => restoreCodeworkDreamSkin());
+  }
+  function ensureCodeworkDreamSkinObserver() {
+    if (window.__codeworkDreamSkinObserver || !document.documentElement) return;
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(window.__codeworkDreamSkinRenderTimer);
+      window.__codeworkDreamSkinRenderTimer = window.setTimeout(renderCodeworkDreamSkin, 120);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.__codeworkDreamSkinObserver = observer;
+  }
+  function runFeiAwayDreamSkin(cssText, artDataUrl, rawConfig) {
+    const runner = window.__CODEX_PLUS_DREAM_SKIN_RUN__;
+    if (typeof runner !== "function" || typeof window.__CODEX_PLUS_DREAM_SKIN_CSS__ !== "string") {
+      throw new Error("Fei-Away Dream Skin runtime is unavailable");
+    }
+    return runner(cssText, artDataUrl, rawConfig);
+  }
+  function codeworkDreamSkinPaletteCss(theme) {
+    const tokens = theme?.tokens || {};
+    const isShinchan = theme?.id === "shinchan-energy";
+    const isCustom = theme?.id === "custom-dream-skin";
+    const layout = theme?.art?.layout === "card" ? "card" : "auto";
+    const canvas = isShinchan ? "#FFF7DF" : (tokens.background || (isCustom ? "#F7FAF8" : "#FFF3F6"));
+    const surface = isShinchan ? "#FFFDF2" : (tokens.surface || (isCustom ? "#FFFFFF" : "#FFFCFD"));
+    const sidebar = isShinchan ? "#FFF1C9" : (isCustom ? "#EFF5F3" : "#FCE9EF");
+    const raised = isShinchan ? "#FFFFFF" : (isCustom ? "#FFFFFF" : "#FFFDFE");
+    const text = tokens.text || (isShinchan ? "#76502E" : (isCustom ? "#26332E" : "#653A47"));
+    const muted = isShinchan ? "#8C704B" : (isCustom ? "#5C6B65" : "#84606B");
+    const accent = tokens.accent || (isShinchan ? "#ED6C58" : (isCustom ? "#3D7FDA" : "#CE4D78"));
+    const border = tokens.border || (isShinchan ? "#EFDFBD" : (isCustom ? "#D7E0DC" : "#F0D7DF"));
+    const radius = Math.max(10, Math.min(Number(tokens.radius) || 14, 24));
+    const welcomeOverlay = isCustom
+      ? `linear-gradient(90deg,color-mix(in srgb,${surface} 20%,transparent) 0%,color-mix(in srgb,${surface} 8%,transparent) 48%,transparent 100%)`
+      : `linear-gradient(90deg,color-mix(in srgb,${surface} 72%,transparent) 0%,color-mix(in srgb,${surface} 36%,transparent) 48%,color-mix(in srgb,${surface} 8%,transparent) 100%)`;
+    return `
+      :root.codex-dream-skin {
+        color-scheme: light !important;
+        --dream-canvas:${canvas} !important;
+        --dream-surface:${surface} !important;
+        --dream-surface-raised:${raised} !important;
+        --dream-sidebar:${sidebar} !important;
+        --dream-text:${text} !important;
+        --dream-text-muted:${muted} !important;
+        --dream-line:${border} !important;
+        --dream-line-soft:color-mix(in srgb,${border} 72%,transparent) !important;
+        --dream-accent:${accent} !important;
+        --dream-accent-soft:color-mix(in srgb,${accent} 12%,${surface}) !important;
+        --dream-accent-hover:color-mix(in srgb,${accent} 19%,${surface}) !important;
+        --dream-hero-shade:color-mix(in srgb,${surface} 89%,transparent) !important;
+        --dream-ambient-opacity:${isShinchan ? ".36" : ".32"} !important;
+        --dream-shadow:0 16px 42px color-mix(in srgb,${accent} 16%,transparent) !important;
+        --dream-immersive-edge:color-mix(in srgb,${surface} 93%,transparent) !important;
+        --dream-immersive-mid:color-mix(in srgb,${surface} 84%,transparent) !important;
+        --dream-immersive-far:color-mix(in srgb,${surface} 72%,transparent) !important;
+        --dream-immersive-sidebar:color-mix(in srgb,${sidebar} 94%,transparent) !important;
+        --dream-task-immersive-sidebar:color-mix(in srgb,${sidebar} 96%,transparent) !important;
+        --dream-immersive-composer:color-mix(in srgb,${raised} 94%,${accent} 4%) !important;
+        --dream-task-immersive-edge:color-mix(in srgb,${surface} 78%,transparent) !important;
+        --dream-task-immersive-mid:color-mix(in srgb,${surface} 58%,transparent) !important;
+        --dream-task-immersive-far:color-mix(in srgb,${surface} 32%,transparent) !important;
+        --text-primary:${text} !important;
+        --text-secondary:${muted} !important;
+        --text-tertiary:${muted} !important;
+        --token-text-primary:${text} !important;
+        --token-text-secondary:${muted} !important;
+        --token-text-tertiary:${muted} !important;
+        --token-main-surface-primary:${surface} !important;
+        --token-main-surface-secondary:${raised} !important;
+        --token-sidebar-surface-primary:${sidebar} !important;
+        --token-border-light:${border} !important;
+        --color-token-foreground:${text} !important;
+        --color-token-text-primary:${text} !important;
+        --color-text-foreground:${text} !important;
+        --color-text-foreground-secondary:${muted} !important;
+        --color-text-foreground-tertiary:${muted} !important;
+        --color-token-description-foreground:${muted} !important;
+        --vscode-foreground:${text} !important;
+        --color-token-dropdown-background:${raised} !important;
+        --color-token-dropdown-foreground:${text} !important;
+        --vscode-dropdown-background:${raised} !important;
+        --vscode-dropdown-foreground:${text} !important;
+        --color-token-border-default:${border} !important;
+        --color-background-surface:${surface} !important;
+        --color-background-elevated-primary:${raised} !important;
+        --color-background-elevated-primary-opaque:${raised} !important;
+        --color-background-elevated-secondary:color-mix(in srgb,${accent} 5%,${raised}) !important;
+        --color-background-elevated-secondary-opaque:color-mix(in srgb,${accent} 5%,${raised}) !important;
+        --color-background-control:color-mix(in srgb,${accent} 4%,${raised}) !important;
+        --color-token-menu-background:${raised} !important;
+      }
+      html.codex-dream-skin,html.codex-dream-skin body { background:${canvas} !important;color:var(--dream-text) !important; }
+      html.codex-dream-skin aside.app-shell-left-panel { background:${sidebar} !important;color:var(--dream-text) !important; }
+      html.codex-dream-skin main.main-surface,html.codex-dream-skin .dream-home,html.codex-dream-skin .dream-task { background:${surface} !important;color:var(--dream-text) !important; }
+      html.codex-dream-skin .dream-home .group\\/home-suggestions button,
+      html.codex-dream-skin .dream-home button,
+      html.codex-dream-skin .dream-task button,
+      html.codex-dream-skin .composer-surface-chrome {
+        background:${raised} !important;color:var(--dream-text) !important;border-color:${border} !important;
+        border-radius:${radius}px !important;
+      }
+      html.codex-dream-skin main.main-surface :is(
+        header button,
+        [role="banner"] button,
+        [data-testid*="header"] button,
+        [class*="thread-header"] button,
+        [class*="task-header"] button,
+        button[aria-haspopup="menu"]
+      ) {
+        color:var(--dream-text) !important;
+      }
+      html.codex-dream-skin main.main-surface :is(
+        header button,
+        [role="banner"] button,
+        [data-testid*="header"] button,
+        [class*="thread-header"] button,
+        [class*="task-header"] button,
+        button[aria-haspopup="menu"]
+      ):hover { background:color-mix(in srgb,${accent} 12%,${raised}) !important; }
+      html.codex-dream-skin .dream-task [class*="text-token-"],
+      html.codex-dream-skin .dream-task [data-message-author-role],
+      html.codex-dream-skin .dream-task article,
+      html.codex-dream-skin .dream-home [class*="text-token-"],
+      html.codex-dream-skin main.main-surface [class*="text-token-"] { color:var(--dream-text) !important;text-shadow:none !important; }
+      html.codex-dream-skin .dream-task [class*="text-"],
+      html.codex-dream-skin .dream-task [data-message-author-role] *,
+      html.codex-dream-skin .dream-task .markdown *,
+      html.codex-dream-skin .dream-task .prose * { color:var(--dream-text) !important;text-shadow:none !important; }
+      html.codex-dream-skin [data-codework-dream-welcome="true"] {
+        position:relative !important;
+        isolation:isolate !important;
+        overflow:hidden !important;
+        border:1px solid ${border} !important;
+        border-radius:${radius + 6}px !important;
+        background-image:${welcomeOverlay},var(--dream-art) !important;
+        background-position:center,var(--dream-art-position) !important;
+        background-size:cover,cover !important;
+        background-repeat:no-repeat,no-repeat !important;
+        box-shadow:var(--dream-shadow) !important;
+      }
+      html.codex-dream-skin [data-codework-dream-welcome="true"] > * { position:relative;z-index:1; }
+      html.codex-dream-skin .dream-task :is(.prose,.markdown,[data-message-author-role]) :not(pre):not(code):not(svg):not(path),
+      html.codex-dream-skin .dream-home :is(.prose,.markdown,[data-message-author-role]) :not(pre):not(code):not(svg):not(path) { color:var(--dream-text) !important; }
+      html.codex-dream-skin .dream-task [class*="bg-token-"],
+      html.codex-dream-skin .dream-task [class*="background"],
+      html.codex-dream-skin .dream-home [class*="bg-token-"] { border-color:${border} !important; }
+      html.codex-dream-skin textarea,html.codex-dream-skin [contenteditable="true"] { background:${raised} !important;color:var(--dream-text) !important;border-color:${border} !important; }
+      html.codex-dream-skin ::selection { background:color-mix(in srgb,${accent} 28%,transparent);color:var(--dream-text); }
+      html.codex-dream-skin.codework-dream-layout-card body { background:${canvas} !important;background-image:none!important; }
+      html.codex-dream-skin.codework-dream-layout-card aside.app-shell-left-panel { background:${sidebar} !important;border-right:1px solid ${border} !important; }
+      html.codex-dream-skin.codework-dream-layout-card main.main-surface,
+      html.codex-dream-skin.codework-dream-layout-card main.main-surface [role="main"] { background:${surface} !important; }
+      html.codex-dream-skin.codework-dream-layout-card main.main-surface.dream-home-shell .dream-home > div:first-child > div:first-child > div:first-child {
+        background-image:var(--dream-art) !important;border:1px solid ${border} !important;border-radius:${radius + 6}px !important;box-shadow:var(--dream-shadow) !important;
+      }
+      html.codex-dream-skin.codework-dream-layout-card main.main-surface.dream-home-shell .dream-home > div:first-child > div:first-child > div:first-child::before { content:"" !important; }
+      html.codex-dream-skin.codework-dream-layout-card .dream-task { background:${surface} !important; }
+      html.codex-dream-skin.codework-dream-layout-card .dream-task::before { content:"" !important;opacity:${isShinchan ? ".34" : ".30"} !important; }
+      html.codex-dream-skin.codework-dream-layout-card .composer-surface-chrome { background:${raised} !important;border:1px solid ${border} !important; }
+    `;
+  }
+  function setCodeworkDreamSkinPaletteStyle(theme) {
+    const existing = document.getElementById("codework-dream-skin-palette-style");
+    if (!theme) { existing?.remove(); return; }
+    const style = existing || document.createElement("style");
+    style.id = "codework-dream-skin-palette-style";
+    style.textContent = codeworkDreamSkinPaletteCss(theme);
+    if (!existing) (document.head || document.documentElement).appendChild(style);
+  }
+  function applyCodeworkDreamSkin(theme, dataUri = "") {
+    if (!isCodeworkDreamSkinTheme(theme)) { restoreCodeworkDreamSkin(); return false; }
+    const payload = window.__CODEWORK_DREAM_SKIN_PAYLOAD__;
+    if (!payload || payload.enabled !== true || payload.themeId !== theme.id) {
+      restoreCodeworkDreamSkin();
+      return false;
+    }
+    const revision = (Number(window.__codeworkDreamSkinRevision) || 0) + 1;
+    const cardLayout = theme.art?.layout === "card" || codeworkCuratedDreamSkinIds.has(theme.id);
+    window.__codeworkDreamSkinRevision = revision;
+    restoreCodeworkDreamSkin();
+    restoreCodeworkCharacterTheme();
+    document.documentElement.classList.toggle("codework-dream-layout-card", cardLayout);
+    window.__codeworkDreamSkinState = { id: theme.id, heroAsset: theme.heroAsset, dataUri, revision };
+    const artRequest = dataUri ? Promise.resolve(dataUri) : loadCodeworkThemeAsset(theme.heroAsset);
+    void artRequest.then((artDataUrl) => {
+      if (window.__codeworkDreamSkinState?.revision !== revision) return;
+      runFeiAwayDreamSkin(window.__CODEX_PLUS_DREAM_SKIN_CSS__, artDataUrl, {
+        appearance: "light",
+        revision: payload.generation || theme.version,
+        palette: theme.id === "custom-dream-skin" ? {} : { accent: theme.tokens.accent },
+        customWallpaper: theme.id === "custom-dream-skin",
+        art: { ...theme.art, layout: cardLayout ? "card" : theme.art?.layout },
+      });
+      sendCodexPlusDiagnostic("dream_skin_applied", {
+        themeId: theme.id,
+        revision: payload.generation || theme.version || "runtime",
+      });
+    }).catch((error) => {
+      sendCodexPlusDiagnostic("dream_skin_apply_failed", {
+        themeId: theme.id,
+        message: String(error?.message || error || "主题渲染失败"),
+      });
+      restoreCodeworkDreamSkin();
+    });
+    return true;
+  }
+  function restoreCodeworkDreamSkin() {
+    window.__codeworkDreamSkinState = null;
+    window.__CODEX_DREAM_SKIN_STATE__?.cleanup?.();
+    window.clearTimeout(window.__codeworkDreamSkinRenderTimer);
+    window.__codeworkDreamSkinObserver?.disconnect();
+    window.__codeworkDreamSkinObserver = null;
+    document.getElementById("codework-dream" + "-skin-style")?.remove();
+    document.getElementById("codework-dream" + "-skin-palette-style")?.remove();
+    document.documentElement.classList.remove("codework-dream-skin");
+    document.documentElement.classList.remove("codework-dream-layout-card");
+    document.documentElement.removeAttribute("data-codework-dream-skin");
+    document.documentElement.style.removeProperty("--codework-dream-art");
+    document.querySelectorAll("[data-codework-dream-home]").forEach((node) => node.removeAttribute("data-codework-dream-home"));
+  }
+  window.restoreCodeworkDreamSkin = restoreCodeworkDreamSkin;
+  function codeworkCharacterThemeCss(theme) {
+    return `:root[data-codework-character-theme="${theme.id}"]{--codework-character-background:${theme.tokens.background};--codework-character-surface:${theme.tokens.surface};--codework-character-accent:${theme.tokens.accent};--codework-character-border:${theme.tokens.border};--codework-character-text:${theme.tokens.text}}[data-codework-theme-scope]{overflow:clip;background:linear-gradient(135deg,color-mix(in srgb,var(--codework-character-surface) 96%,transparent),color-mix(in srgb,var(--codework-character-background) 88%,transparent))!important;color:var(--codework-character-text)!important}[data-codework-theme-scope] > :not(#codework-character-theme-hero){position:relative;z-index:1}[data-codework-theme-scope] textarea,[data-codework-theme-scope] [contenteditable="true"]{background:color-mix(in srgb,var(--codework-character-surface) 96%,transparent)!important;border-color:var(--codework-character-border)!important;color:var(--codework-character-text)!important;border-radius:18px!important}[data-codework-theme-scope] a{color:var(--codework-character-accent)!important}#codework-character-theme-hero{position:absolute;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(90deg,color-mix(in srgb,var(--codework-character-background) 92%,transparent) 0%,color-mix(in srgb,var(--codework-character-background) 65%,transparent) 46%,color-mix(in srgb,var(--codework-character-background) 28%,transparent) 100%),var(--codework-character-hero);background-repeat:no-repeat;background-position:center,right bottom;background-size:cover,clamp(360px,48vw,760px) auto;opacity:.96}`;
+  }
+  function setCodeworkCharacterThemeStyle(theme) {
+    const id = "codework-character-theme-style";
+    const existing = document.getElementById(id);
+    if (!theme) { existing?.remove(); return; }
+    const style = existing || document.createElement("style");
+    style.id = id;
+    style.textContent = `${codeworkCharacterThemeCss(theme)}[data-codework-theme-scope] [class*="text-token"],[data-codework-theme-scope] [data-testid*="empty"]{color:var(--codework-character-text)!important;text-shadow:none!important}`;
+    if (!existing) document.documentElement.appendChild(style);
+  }
+  function renderCodeworkCharacterThemeSurface() {
+    const state = window.__codeworkCharacterThemeState;
+    const hero = document.getElementById("codework-character-theme-hero");
+    const scope = setCodeworkThemeScope();
+    if (!state || !scope) {
+      hero?.remove();
+      document.body?.removeAttribute("data-codework-character-home");
+      return;
+    }
+    if (!document.body || !document.documentElement) return;
+    document.body.setAttribute("data-codework-character-home", "true");
+    const layer = hero || document.createElement("div");
+    layer.id = "codework-character-theme-hero";
+    layer.setAttribute("aria-hidden", "true");
+    layer.style.setProperty("--codework-character-hero", "none");
+    if (!hero || hero.parentElement !== scope) {
+      hero?.remove();
+      scope.prepend(layer);
+    }
+    void loadCodeworkThemeAsset(state.heroAsset).then((dataUri) => {
+      if (window.__codeworkCharacterThemeState?.id !== state.id || !document.querySelector("[data-codework-theme-scope]")) return;
+      document.getElementById("codework-character-theme-hero")?.style.setProperty("--codework-character-hero", `url("${dataUri}")`);
+    }).catch(() => restoreCodeworkCharacterTheme());
+  }
+  function ensureCodeworkCharacterThemeObserver() {
+    if (window.__codeworkCharacterThemeObserver || !document.documentElement) return;
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(window.__codeworkCharacterThemeRenderTimer);
+      window.__codeworkCharacterThemeRenderTimer = window.setTimeout(renderCodeworkCharacterThemeSurface, 250);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.__codeworkCharacterThemeObserver = observer;
+  }
+  function applyCodeworkCharacterTheme(theme) {
+    if (!isCodeworkCharacterTheme(theme)) { restoreCodeworkCharacterTheme(); return false; }
+    window.__codeworkCharacterThemeState = theme;
+    document.documentElement.setAttribute("data-codework-character-theme", theme.id);
+    document.body?.setAttribute("data-codework-character-theme", theme.id);
+    setCodeworkCharacterThemeStyle(theme);
+    ensureCodeworkCharacterThemeObserver();
+    renderCodeworkCharacterThemeSurface();
+    return true;
+  }
+  function restoreCodeworkCharacterTheme() {
+    window.__codeworkCharacterThemeState = null;
+    window.clearTimeout(window.__codeworkCharacterThemeRenderTimer);
+    window.__codeworkCharacterThemeObserver?.disconnect();
+    window.__codeworkCharacterThemeObserver = null;
+    document.getElementById("codework-character-theme-hero")?.remove();
+    document.getElementById("codework-character-theme-style")?.remove();
+    document.documentElement.removeAttribute("data-codework-character-theme");
+    document.body?.removeAttribute("data-codework-character-theme");
+    document.body?.removeAttribute("data-codework-character-home");
+    clearCodeworkThemeScope();
+  }
   function codeworkVisualThemeSettingsMatch(snapshot) {
     return codexPlusBackendSettings.codexAppVisualThemeEnabled === true
-      && String(codexPlusBackendSettings.codexAppVisualThemeId || "cyber-neon") === snapshot.themeId
-      && normalizeCodeworkVisualThemeServiceUrl(codexPlusBackendSettings.codexAppVisualThemeServiceUrl) === snapshot.serviceUrl;
+      && String(codexPlusBackendSettings.codexAppVisualThemeId || "cyber-neon") === snapshot.themeId;
   }
   function refreshCodeworkVisualTheme(snapshot) {
     codeworkVisualThemeAbortController?.abort();
@@ -1303,17 +1770,38 @@
     codeworkVisualThemeAbortController = controller;
     window.__codeworkVisualThemeAbortController = controller;
     const requestId = ++codeworkVisualThemeRequestId;
-    void fetch(`${snapshot.serviceUrl}/v1/themes/manifest`, { credentials: "omit", signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("theme manifest response failed");
-        return response.json();
-      })
+    const request = typeof window.__codexSessionDeleteBridge === "function"
+      ? window.__codexSessionDeleteBridge("/theme/manifest", {})
+      : Promise.reject(new Error("theme bridge is unavailable"));
+    void request
       .then((manifest) => {
         if (!isSafeCodeworkThemeManifest(manifest) || controller.signal.aborted || requestId !== codeworkVisualThemeRequestId || !codeworkVisualThemeSettingsMatch(snapshot)) return;
         const selectedTheme = manifest.themes.find((theme) => theme.id === snapshot.themeId);
-        if (selectedTheme) setCodeworkVisualThemeTokens(selectedTheme.tokens);
+        const allowedThemeIds = new Set(manifest.allowedThemeIds || []);
+        if (!selectedTheme || (selectedTheme.access === "restricted" && !allowedThemeIds.has(selectedTheme.id))) {
+          restoreCodeworkDreamSkin();
+          restoreCodeworkCharacterTheme();
+          setCodeworkBaseThemeTokens(null);
+          return;
+        }
+        if (isCodeworkDreamSkinTheme(selectedTheme)) {
+          setCodeworkBaseThemeTokens(null);
+          applyCodeworkDreamSkin(selectedTheme);
+        } else {
+          restoreCodeworkDreamSkin();
+          setCodeworkThemeScope();
+          setCodeworkBaseThemeTokens(selectedTheme.tokens);
+          if (isCodeworkCharacterTheme(selectedTheme)) applyCodeworkCharacterTheme(selectedTheme);
+          else restoreCodeworkCharacterTheme();
+        }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!codeworkVisualThemeTokens[snapshot.themeId]) {
+          restoreCodeworkDreamSkin();
+          restoreCodeworkCharacterTheme();
+          setCodeworkBaseThemeTokens(null);
+        }
+      })
       .finally(() => {
         if (codeworkVisualThemeAbortController === controller) codeworkVisualThemeAbortController = null;
       });
@@ -1323,14 +1811,38 @@
     window.__codeworkVisualThemePollTimer = null;
     codeworkVisualThemeAbortController?.abort();
     if (codexPlusBackendSettings.codexAppVisualThemeEnabled !== true) {
-      setCodeworkVisualThemeTokens(null);
+      restoreCodeworkDreamSkin();
+      restoreCodeworkCharacterTheme();
+      setCodeworkBaseThemeTokens(null);
       return;
     }
     const themeId = String(codexPlusBackendSettings.codexAppVisualThemeId || "cyber-neon");
-    setCodeworkVisualThemeTokens(codeworkVisualThemeTokens[themeId] || null);
-    const serviceUrl = normalizeCodeworkVisualThemeServiceUrl(codexPlusBackendSettings.codexAppVisualThemeServiceUrl);
-    if (!serviceUrl) return;
-    const snapshot = { themeId, serviceUrl };
+    if (themeId === "custom-dream-skin") {
+      void loadCodexPlusLocalImageAsset().then((localImageUrl) => {
+        setCodeworkBaseThemeTokens(null);
+        applyCodeworkDreamSkin({
+          id: "custom-dream-skin",
+          cssProfile: "dream-skin-light",
+          heroAsset: "local-custom-wallpaper.png",
+          art: { focusX: 0.5, focusY: 0.45, safeArea: "left", taskMode: "ambient" },
+          tokens: { background: "#f7faf8", surface: "#ffffff", accent: "#3d7fda", border: "#d7e0dc", text: "#26332e", radius: 18, fontScale: 1 },
+        }, localImageUrl);
+      }).catch((error) => {
+        sendCodexPlusDiagnostic("dream_skin_apply_failed", {
+          themeId: "custom-dream-skin",
+          message: String(error?.message || error || "本地壁纸读取失败"),
+        });
+        restoreCodeworkDreamSkin();
+      });
+      return;
+    }
+    setCodeworkThemeScope();
+    setCodeworkBaseThemeTokens(codeworkVisualThemeTokens[themeId] || null);
+    if (codeworkVisualThemeTokens[themeId]) {
+      restoreCodeworkDreamSkin();
+      restoreCodeworkCharacterTheme();
+    }
+    const snapshot = { themeId };
     refreshCodeworkVisualTheme(snapshot);
     window.__codeworkVisualThemePollTimer = window.setInterval(() => refreshCodeworkVisualTheme(snapshot), 5 * 60 * 1000);
   }
@@ -2863,6 +3375,13 @@
 
   function installCodexPlusMenu() {
     const existing = document.getElementById(codexPlusMenuId);
+    // Dream Skin supplies the single, centred identity toolbar.  Keeping this
+    // legacy floating trigger alive produces a duplicate crown/version badge
+    // and eventually overlaps the native window controls.
+    if (window.__CODEX_DREAM_SKIN_STATE__?.installed === true) {
+      existing?.remove();
+      return;
+    }
     removeDuplicateCodexPlusMenus(existing);
     let insertionPoint = findNativeMenuInsertionPoint();
     if (existing && existing.dataset.codexPlusMenuVersion !== "6") {
@@ -2924,8 +3443,15 @@
     const nextKinds = Array.isArray(next.marketplaceKinds)
       ? next.marketplaceKinds.map((kind) => restorePluginMarketplaceName(kind))
       : ["local"];
-    if (!nextKinds.includes("vertical")) nextKinds.push("vertical");
-    next.marketplaceKinds = Array.from(new Set(nextKinds));
+    if (codexPlusBackendSettings.launchMode === "relay") {
+      if (!nextKinds.includes("vertical")) nextKinds.push("vertical");
+      next.marketplaceKinds = Array.from(new Set(nextKinds));
+    } else {
+      // The upstream remote catalog only accepts a ChatGPT session.  API-key
+      // launches must stay on the bundled/local catalog so the entire plugin
+      // screen does not fail before Codework can merge its local marketplaces.
+      next.marketplaceKinds = ["local"];
+    }
     sendCodexPlusDiagnostic("plugin_marketplace_request_expanded", {
       hadMarketplaceKinds,
       marketplaceKinds: next.marketplaceKinds,
@@ -3563,7 +4089,10 @@
   }
 
   function pluginPatchDisabledInRelayMode() {
-    return !codexPlusBackendSettingsLoaded || codexPlusBackendSettings.launchMode === "relay";
+    // The plugin view can request its catalog before native settings finish
+    // loading. Patch that first request in the default API-key mode; once the
+    // backend confirms a relay session, keep its remote catalog untouched.
+    return codexPlusBackendSettingsLoaded && codexPlusBackendSettings.launchMode === "relay";
   }
 
   function clearPluginPatchArtifacts() {
@@ -4489,6 +5018,14 @@
   }
 
   async function fetchIdentityStatusFromHelper(payload) {
+    const result = await postJson("/identity/status", payload || {});
+    if (result?.status === "ok") {
+      sendCodexPlusDiagnostic("identity_bridge_ok", {
+        role: normalizeCodexPlusIdentityRole(result.role),
+      });
+    }
+    return result;
+
     try {
       const response = await fetch(`${helperBase}/identity/status`, {
         method: "POST",

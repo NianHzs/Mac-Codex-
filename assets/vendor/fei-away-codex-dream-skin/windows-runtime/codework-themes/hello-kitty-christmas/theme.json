@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "hello-kitty-christmas",
+  "name": "凯蒂猫圣诞主题",
+  "brandSubtitle": "CODEWORK DREAM SKIN",
+  "tagline": "温柔、明亮、陪伴创作",
+  "projectPrefix": "项目 · ",
+  "projectLabel": "新建项目",
+  "statusText": "CODEWORK DREAM SKIN ONLINE",
+  "quote": "MAKE SOMETHING LOVELY",
+  "image": "art.jpg",
+  "appearance": "light",
+  "palette": { "accent": "#CE4D78" },
+  "art": { "focusX": 0.72, "focusY": 0.45, "safeArea": "left", "taskMode": "ambient" }
+}

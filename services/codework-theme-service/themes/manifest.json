@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "updatedAt": "2026-07-18T00:00:00Z",
+  "version": "2",
+  "updatedAt": "2026-07-21T01:50:00Z",
   "themes": [
     {
       "id": "cyber-neon",
@@ -17,8 +17,12 @@
       "detail": "粉白首页、凯蒂猫小屋主视觉与柔和功能卡",
       "tier": "pro",
       "version": "1.0.0",
+      "revision": "2026-07-19-r1",
+      "sha256": "f5abf6d64bd16d521391174b6cecc8c06e5ba5633108efbef322c1fed6c4479d",
+      "assetBytes": 83313,
       "access": "restricted",
-      "cssProfile": "character-hero-light",
+      "cssProfile": "dream-skin-light",
+      "art": { "focusX": 0.72, "focusY": 0.45, "safeArea": "left", "taskMode": "ambient", "layout": "card" },
       "previewAsset": "kitty-christmas-thumb.jpg",
       "heroAsset": "kitty-christmas.jpg",
       "tokens": { "background": "#FFF3F6", "surface": "#FFFCFD", "accent": "#CE4D78", "border": "#F0D7DF", "text": "#653A47", "radius": 14, "fontScale": 1.0 }
@@ -29,11 +33,31 @@
       "detail": "奶油黄首页、小新角色拼贴与暖橙功能卡",
       "tier": "pro",
       "version": "1.0.0",
+      "revision": "2026-07-19-r1",
+      "sha256": "15cc03d9a450344153c5932ef584e7250e528585163d7df45f14f06c370c198e",
+      "assetBytes": 1680323,
       "access": "restricted",
-      "cssProfile": "character-hero-light",
+      "cssProfile": "dream-skin-light",
+      "art": { "focusX": 0.72, "focusY": 0.42, "safeArea": "left", "taskMode": "ambient", "layout": "card" },
       "previewAsset": "shinchan-collage-thumb.png",
       "heroAsset": "shinchan-collage.png",
       "tokens": { "background": "#FFF7DF", "surface": "#FFFDF2", "accent": "#ED6C58", "border": "#EFDFBD", "text": "#76502E", "radius": 14, "fontScale": 1.0 }
+    },
+    {
+      "id": "hello-kitty-cloud-dream",
+      "name": "凯蒂猫限定主题 · 云朵梦境",
+      "detail": "粉色云朵首页、凯蒂猫梦境主视觉与柔粉功能卡",
+      "tier": "pro",
+      "version": "1.0.0",
+      "revision": "2026-07-21-r2",
+      "sha256": "2a3a6444212e86585354102703b056eaa4fef7f6fd8c1177f2afe87ee1ffc65a",
+      "assetBytes": 1572991,
+      "access": "restricted",
+      "cssProfile": "dream-skin-light",
+      "art": { "focusX": 0.5, "focusY": 0.52, "safeArea": "left", "taskMode": "ambient", "layout": "card" },
+      "previewAsset": "kitty-cloud-dream.jpg",
+      "heroAsset": "kitty-cloud-dream.jpg",
+      "tokens": { "background": "#FFF7FA", "surface": "#FFFCFD", "accent": "#D85B8C", "border": "#F0D2DE", "text": "#673B4A", "radius": 18, "fontScale": 1.0 }
     }
   ]
 }

@@ -6,10 +6,21 @@ use std::path::Path;
 use crate::settings::BackendSettings;
 
 const RENDERER_SCRIPT: &str = include_str!("../../../assets/inject/renderer-inject.js");
+// Vendored unchanged from Fei-Away/Codex-Dream-Skin under the MIT license.
+// Keep the accompanying LICENSE and NOTICE files beside these sources.
+const FEI_AWAY_DREAM_SKIN_CSS: &str = include_str!("../../../assets/vendor/fei-away-codex-dream-skin/dream-skin.css");
+const FEI_AWAY_DREAM_SKIN_RUNTIME: &str = include_str!("../../../assets/vendor/fei-away-codex-dream-skin/renderer-inject.js");
 const STEPWISE_SCRIPT: &str = include_str!("../../../assets/inject/stepwise-inject.js");
 const SPONSOR_WECHAT: &[u8] =
     include_bytes!("../../../assets/images/codework-sponsor-wechat.jpg");
 pub const DIAGNOSTIC_BUILD_ID: &str = "diag-20260518-1";
+
+fn fei_away_dream_skin_runner() -> &'static str {
+    FEI_AWAY_DREAM_SKIN_RUNTIME
+        .trim_end()
+        .strip_suffix("(__DREAM_CSS_JSON__, __DREAM_ART_JSON__, __DREAM_THEME_JSON__)")
+        .expect("vendored Fei-Away renderer must end with its three runtime placeholders")
+}
 
 pub fn renderer_script() -> &'static str {
     RENDERER_SCRIPT
@@ -37,11 +48,16 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let paste_fix = paste_fix_enabled_config(settings);
     let force_chinese_locale = force_chinese_locale_config(settings);
     let fast_startup = fast_startup_config(settings);
+    let dream_skin_payload = dream_skin_payload(settings);
+    let dream_skin_runner = fei_away_dream_skin_runner();
     format!(
-        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\n{}\n{}",
+        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_PRODUCT_LABEL__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\nwindow.__CODEWORK_DREAM_SKIN_PAYLOAD__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_CSS__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_RUN__ = {};\n{}\n{}",
         serde_json::to_string(&helper_url).expect("helper URL should serialize"),
         serde_json::to_string(&sponsor_images).expect("sponsor images should serialize"),
-        serde_json::to_string(crate::version::VERSION).expect("version should serialize"),
+        serde_json::to_string(crate::version::PRODUCT_LABEL)
+            .expect("product label should serialize"),
+        serde_json::to_string(crate::version::DISPLAY_VERSION)
+            .expect("display version should serialize"),
         serde_json::to_string(DIAGNOSTIC_BUILD_ID).expect("build id should serialize"),
         serde_json::to_string(&image_overlay).expect("image overlay config should serialize"),
         serde_json::to_string(&plugin_marketplaces).expect("plugin marketplaces should serialize"),
@@ -49,9 +65,20 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
         serde_json::to_string(&force_chinese_locale)
             .expect("force Chinese locale config should serialize"),
         serde_json::to_string(&fast_startup).expect("fast startup config should serialize"),
+        serde_json::to_string(&dream_skin_payload).expect("Dream Skin payload should serialize"),
+        serde_json::to_string(FEI_AWAY_DREAM_SKIN_CSS).expect("Dream Skin CSS should serialize"),
+        dream_skin_runner,
         renderer_script(),
         stepwise_script(),
     )
+}
+
+fn dream_skin_payload(settings: &BackendSettings) -> Value {
+    json!({
+        "enabled": settings.codex_app_visual_theme_enabled,
+        "themeId": settings.codex_app_visual_theme_id,
+        "generation": "settings-v1",
+    })
 }
 
 fn local_plugin_marketplaces() -> Value {
@@ -236,19 +263,20 @@ fn installed_plugins_from_config(home: &Path) -> std::collections::BTreeSet<Stri
 }
 
 pub fn image_overlay_config(helper_port: u16, settings: &BackendSettings) -> Value {
-    let has_path = !settings.codex_app_image_overlay_path.trim().is_empty();
-    let enabled = settings.codex_app_image_overlay_enabled && has_path;
-    let data_url = if enabled {
-        image_file_data_uri(Path::new(settings.codex_app_image_overlay_path.trim()))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let path = Path::new(settings.codex_app_image_overlay_path.trim());
+    let content_type = image_content_type(path).unwrap_or_default();
+    let selected_custom_wallpaper = !settings.codex_app_visual_theme_enabled
+        || settings.codex_app_visual_theme_id.trim() == "custom-dream-skin";
+    let enabled = selected_custom_wallpaper
+        && settings.codex_app_image_overlay_enabled
+        && path.is_file()
+        && matches!(content_type, "image/png" | "image/jpeg" | "image/webp");
     json!({
-        "enabled": enabled && !data_url.is_empty(),
+        "enabled": enabled,
         "opacity": f64::from(settings.codex_app_image_overlay_opacity.clamp(1, 100)) / 100.0,
         "fitMode": settings.codex_app_image_overlay_fit_mode.as_str(),
-        "dataUrl": data_url,
+        "contentType": if enabled { content_type } else { "" },
+        "dataUrl": "",
         "imageUrl": if enabled {
             format!("http://127.0.0.1:{helper_port}/overlay/image")
         } else {
@@ -276,12 +304,6 @@ fn image_data_uri(mime_type: &str, bytes: &[u8]) -> String {
     )
 }
 
-fn image_file_data_uri(path: &Path) -> Option<String> {
-    let mime_type = image_content_type(path)?;
-    let bytes = std::fs::read(path).ok()?;
-    Some(image_data_uri(mime_type, &bytes))
-}
-
 fn image_content_type(path: &Path) -> Option<&'static str> {
     match path
         .extension()
@@ -292,8 +314,6 @@ fn image_content_type(path: &Path) -> Option<&'static str> {
         Some("png") => Some("image/png"),
         Some("jpg") | Some("jpeg") => Some("image/jpeg"),
         Some("webp") => Some("image/webp"),
-        Some("gif") => Some("image/gif"),
-        Some("bmp") => Some("image/bmp"),
         _ => None,
     }
 }
@@ -311,6 +331,161 @@ mod tests {
         let config = image_overlay_config(57321, &settings);
 
         assert_eq!(config["fitMode"].as_str(), Some("fill"));
+    }
+
+    #[test]
+    fn image_overlay_config_uses_loopback_url_without_embedding_image_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wallpaper.png");
+        std::fs::write(&path, b"large-local-wallpaper").unwrap();
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: true,
+            codex_app_image_overlay_path: path.to_string_lossy().to_string(),
+            ..BackendSettings::default()
+        };
+
+        let config = image_overlay_config(57321, &settings);
+        assert_eq!(config["enabled"], true);
+        assert_eq!(config["dataUrl"], "");
+        assert_eq!(config["imageUrl"], "http://127.0.0.1:57321/overlay/image");
+        assert_eq!(config["contentType"], "image/png");
+        assert!(!injection_script_with_settings(57321, &settings)
+            .contains("bGFyZ2UtbG9jYWwtd2FsbHBhcGVy"));
+    }
+
+    #[test]
+    fn image_overlay_is_disabled_when_a_curated_visual_theme_is_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy-custom-wallpaper.png");
+        std::fs::write(&path, b"legacy-wallpaper").unwrap();
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: true,
+            codex_app_image_overlay_path: path.to_string_lossy().to_string(),
+            codex_app_visual_theme_enabled: true,
+            codex_app_visual_theme_id: "shinchan-energy".to_string(),
+            ..BackendSettings::default()
+        };
+
+        let config = image_overlay_config(57321, &settings);
+
+        assert_eq!(config["enabled"], false);
+        assert_eq!(config["imageUrl"], "");
+    }
+
+    #[test]
+    fn visual_theme_scopes_colours_to_the_content_workspace() {
+        let script = renderer_script();
+
+        assert!(script.contains("[data-codework-theme-scope]"));
+        assert!(!script.contains("aside *{color:var(--codework-theme-text)!important}"));
+        assert!(!script.contains("html,body{background-color:var(--codework-theme-background)"));
+    }
+
+    #[test]
+    fn character_themes_use_the_internal_bridge_and_have_a_safe_restore_path() {
+        let script = injection_script(57321);
+
+        assert!(script.contains("window.__codexSessionDeleteBridge(\"/theme/manifest\", {})"));
+        assert!(script.contains("window.__codexSessionDeleteBridge(\"/theme/assets\", { assetName })"));
+        assert!(script.contains("postJson(\"/identity/status\", payload || {})"));
+        assert!(script.contains("restoreCodeworkCharacterTheme"));
+        assert!(script.contains("data-codework-character-theme"));
+    }
+
+    #[test]
+    fn renderer_accepts_the_signed_dream_skin_manifest_metadata() {
+        let script = renderer_script();
+
+        assert!(script.contains(
+            "const codeworkVisualThemeItemKeys = [\"id\", \"name\", \"detail\", \"tier\", \"version\", \"revision\", \"sha256\", \"assetBytes\""
+        ));
+        assert!(script.contains(
+            "const codeworkVisualThemeManifestKeys = [\"version\", \"updatedAt\", \"authorizationExpiresAt\", \"themes\", \"allowedThemeIds\"]"
+        ));
+    }
+
+    #[test]
+    fn dream_skin_keeps_character_art_visible_in_card_layouts() {
+        let renderer = renderer_script();
+
+        assert!(renderer.contains("--dream-ambient-opacity:${isShinchan ? \".36\" : \".32\"} !important;"));
+        assert!(renderer.contains(".dream-task::before { content:\"\" !important;opacity:${isShinchan ? \".34\" : \".30\"} !important;"));
+    }
+
+    #[test]
+    fn wide_dream_skin_task_surface_leaves_character_art_visible() {
+        let renderer = renderer_script();
+
+        assert!(renderer.contains("--dream-task-immersive-edge:color-mix(in srgb,${surface} 78%,transparent) !important;"));
+        assert!(renderer.contains("--dream-task-immersive-mid:color-mix(in srgb,${surface} 58%,transparent) !important;"));
+        assert!(renderer.contains("--dream-task-immersive-far:color-mix(in srgb,${surface} 32%,transparent) !important;"));
+    }
+
+    #[test]
+    fn dream_skin_treats_the_empty_start_surface_as_home_when_the_home_icon_is_absent() {
+        let renderer = renderer_script();
+
+        assert!(renderer.contains("!shellMain.querySelector(\"[data-message-author-role], .thread-scroll-container\")"));
+    }
+
+    #[test]
+    fn dream_skin_assets_are_pinned_and_the_adapter_has_one_owner() {
+        let script = injection_script(57321);
+
+        assert!(include_str!("../../../assets/vendor/fei-away-codex-dream-skin/UPSTREAM.md")
+            .contains("Codex Dream Skin"));
+        assert!(script.contains("window.__CODEWORK_DREAM_SKIN_PAYLOAD__"));
+        assert_eq!(script.matches("codework-dream-skin-style").count(), 0);
+        assert!(!renderer_script().contains("setCodeworkVisualThemeTokens"));
+        assert!(!script.contains("setCodeworkDreamSkinPaletteStyle(theme);"));
+        assert!(!script.contains("renderCodeworkDreamSkin();"));
+        assert!(!script.contains("ensureCodeworkDreamSkinObserver();"));
+    }
+
+    #[test]
+    fn dream_skin_preserves_native_header_control_layout_and_visibility() {
+        let renderer = renderer_script();
+        let injection = injection_script(57321);
+
+        assert!(!renderer.contains("visibility:visible !important;"));
+        assert!(!renderer.contains("pointer-events:auto !important;\n        z-index:12 !important;"));
+        assert!(!renderer.contains("position:relative !important;\n        visibility:visible !important;"));
+        assert!(!injection.contains(".dream-task > * {"));
+        assert!(injection.contains(".dream-task > :not(header.app-header-tint) {"));
+    }
+
+    #[test]
+    fn dream_skin_renders_the_task_rail_as_one_continuous_yellow_track() {
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "html.codex-dream-skin [class*=\"application-menu-top-bar\"]"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "html.codex-dream-skin [class*=\"navigation-row\"]"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "button[class*=\"navigation-row\"] {"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "nav:has(button[class*=\"navigation-row\"])::before"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "background: linear-gradient(to bottom, #F8D96C, #E2AA1E) !important;"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "button[class*=\"navigation-row\"]:has([class~=\"bg-token-foreground\"]) [class*=\"marker\"]"
+        ));
+        assert!(FEI_AWAY_DREAM_SKIN_CSS.contains(
+            "background: color-mix(in srgb, var(--dream-sidebar) 88%, var(--dream-surface)) !important;"
+        ));
+    }
+
+    #[test]
+    fn injection_script_exposes_the_fixed_codework_client_product_label() {
+        let script = injection_script(57321);
+
+        assert!(script.contains(
+            "window.__CODEX_PLUS_PRODUCT_LABEL__ = \"Codework AI客户端\";"
+        ));
     }
 
     #[test]

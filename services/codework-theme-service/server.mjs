@@ -26,6 +26,14 @@ function themeForAsset(manifest, fileName) {
   return manifest.themes.find((theme) => theme.heroAsset === fileName || theme.previewAsset === fileName) || null;
 }
 
+function memberThemeIds(member, grants, manifest) {
+  const configured = Array.isArray(member?.themeIds)
+    ? member.themeIds
+    : Array.isArray(grants[member.userId]) ? grants[member.userId] : [];
+  const available = new Set((manifest.themes || []).map((theme) => theme?.id).filter((id) => typeof id === 'string'));
+  return [...new Set(configured.filter((id) => typeof id === 'string' && available.has(id)))].sort();
+}
+
 export function createThemeService({ manifest, grants, verifyMember, readAsset }) {
   async function memberFor(authorization) {
     const token = bearerToken(authorization);
@@ -41,10 +49,20 @@ export function createThemeService({ manifest, grants, verifyMember, readAsset }
 
     const member = await memberFor(authorization);
     if (!member?.userId) return json(401, { status: "unauthorized" });
-    const allowedThemeIds = Array.isArray(grants[member.userId]) ? grants[member.userId].filter((id) => typeof id === "string") : [];
+    const allowedThemeIds = memberThemeIds(member, grants, manifest);
     const cacheHeaders = { "Cache-Control": "private, max-age=300", Vary: "Authorization" };
 
-    if (path === "/v1/themes/manifest") return json(200, { ...manifest, allowedThemeIds }, cacheHeaders);
+    if (path === "/v1/themes/manifest") {
+      const themes = Array.isArray(manifest.themes)
+        ? manifest.themes.filter((theme) => theme?.access !== "restricted" || allowedThemeIds.includes(theme.id))
+        : [];
+      return json(200, {
+        ...manifest,
+        authorizationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        allowedThemeIds,
+        themes,
+      }, cacheHeaders);
+    }
     const assetMatch = /^\/v1\/themes\/assets\/([^/]+)$/.exec(path);
     if (!assetMatch) return json(404, { status: "not_found" });
 
@@ -65,11 +83,12 @@ export function createThemeService({ manifest, grants, verifyMember, readAsset }
 
 async function verifyRemoteMember(token) {
   try {
-    const response = await fetch(`${lotteryServiceUrl}/api/client/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(`${lotteryServiceUrl}/api/client/theme-grants/me`, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) return null;
     const payload = await response.json();
-    const userId = typeof payload?.user?.id === "string" ? payload.user.id.trim() : typeof payload?.userId === "string" ? payload.userId.trim() : "";
-    return userId ? { userId } : null;
+    const userId = typeof payload?.user?.id === "string" ? payload.user.id.trim() : "";
+    const themeIds = Array.isArray(payload?.themeIds) ? payload.themeIds.filter((id) => typeof id === 'string') : null;
+    return userId && themeIds ? { userId, themeIds } : null;
   } catch {
     return null;
   }

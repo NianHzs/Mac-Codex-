@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "shinchan-energy",
+  "name": "蜡笔小新活力主题",
+  "brandSubtitle": "CODEWORK DREAM SKIN",
+  "tagline": "轻松、有趣、保持灵感",
+  "projectPrefix": "项目 · ",
+  "projectLabel": "新建项目",
+  "statusText": "CODEWORK DREAM SKIN ONLINE",
+  "quote": "MAKE SOMETHING FUN",
+  "image": "art.png",
+  "appearance": "light",
+  "palette": { "accent": "#ED6C58" },
+  "art": { "focusX": 0.72, "focusY": 0.42, "safeArea": "left", "taskMode": "ambient" }
+}
