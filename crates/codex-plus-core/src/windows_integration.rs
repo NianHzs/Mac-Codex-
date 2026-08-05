@@ -7,7 +7,6 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(windows)]
-use std::sync::OnceLock;
 
 #[cfg(windows)]
 use anyhow::Context;
@@ -24,8 +23,10 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 };
 #[cfg(windows)]
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_EXPAND_SZ, REG_SZ, RegCloseKey,
-    RegCreateKeyW, RegDeleteKeyW, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, REG_EXPAND_SZ, REG_SZ,
+    REG_ROUTINE_FLAGS, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegCloseKey, RegCreateKeyW,
+    RegDeleteKeyW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegGetValueW, RegOpenKeyExW,
+    RegSetValueExW,
 };
 #[cfg(windows)]
 use windows::Win32::System::Threading::{
@@ -43,8 +44,9 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINNOACTIVE;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE,
-    SetForegroundWindow, ShowWindow,
+    EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetClassLongPtrW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, GCLP_HICON, GCLP_HICONSM, SWP_FRAMECHANGED,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_RESTORE,
 };
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -320,6 +322,108 @@ pub fn enumerate_processes() -> Vec<WindowsProcessInfo> {
     processes
 }
 
+/// 枚举卸载表下的子键名，用于按 DisplayName 找第三方软件的真实安装路径。
+///
+/// `per_user` 为真时读 HKCU，否则读 HKLM。读不到直接返回空表，调用方按「没找到」处理。
+#[cfg(windows)]
+pub fn enumerate_uninstall_subkeys(root: &str, per_user: bool) -> Vec<String> {
+    let hive = if per_user {
+        HKEY_CURRENT_USER
+    } else {
+        HKEY_LOCAL_MACHINE
+    };
+    let root_wide = wide_null(root);
+    let mut key = HKEY::default();
+    if unsafe { RegOpenKeyExW(hive, PCWSTR(root_wide.as_ptr()), 0, KEY_READ, &mut key) }.is_err() {
+        return Vec::new();
+    }
+    let _guard = RegistryKeyGuard(key);
+
+    let mut names = Vec::new();
+    let mut index = 0u32;
+    loop {
+        // 注册表键名上限 255 字符，留足缓冲区一次读完。
+        let mut buffer = [0u16; 256];
+        let mut length = buffer.len() as u32;
+        let status = unsafe {
+            RegEnumKeyExW(
+                key,
+                index,
+                PWSTR(buffer.as_mut_ptr()),
+                &mut length,
+                None,
+                PWSTR::null(),
+                None,
+                None,
+            )
+        };
+        if status.is_err() {
+            break;
+        }
+        names.push(nul_terminated_wide_to_string(&buffer));
+        index += 1;
+    }
+    names
+}
+
+/// 读取卸载表某个子键下的字符串值（如 DisplayName / InstallLocation / DisplayIcon）。
+#[cfg(windows)]
+pub fn read_uninstall_string(
+    root: &str,
+    subkey: &str,
+    value_name: &str,
+    per_user: bool,
+) -> Option<String> {
+    let hive = if per_user {
+        HKEY_CURRENT_USER
+    } else {
+        HKEY_LOCAL_MACHINE
+    };
+    let full_path = wide_null(format!("{root}\\{subkey}"));
+    let name = wide_null(value_name);
+    let flags = REG_ROUTINE_FLAGS(RRF_RT_REG_SZ.0 | RRF_RT_REG_EXPAND_SZ.0);
+
+    let mut size = 0u32;
+    unsafe {
+        RegGetValueW(
+            hive,
+            PCWSTR(full_path.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            flags,
+            None,
+            None,
+            Some(&mut size),
+        )
+    }
+    .ok()
+    .ok()?;
+    if size == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; (size as usize).div_ceil(2)];
+    unsafe {
+        RegGetValueW(
+            hive,
+            PCWSTR(full_path.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            flags,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    }
+    .ok()
+    .ok()?;
+
+    let value = nul_terminated_wide_to_string(&buffer);
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 #[cfg(windows)]
 pub fn terminate_process(process_id: u32) -> bool {
     let Ok(handle) = (unsafe {
@@ -377,6 +481,38 @@ pub fn apply_codexplusplus_icon_to_process_window(
         applied = true;
     }
     applied
+}
+
+#[cfg(windows)]
+pub fn apply_codexplusplus_icon_to_process_tree(process_id: u32, icon_resource_path: PathBuf) -> bool {
+    let processes = enumerate_processes();
+    let process_tree = processes.iter().map(|item| (item.process_id, item.parent_process_id)).collect::<Vec<_>>();
+    descendant_process_ids(process_id, &process_tree)
+        .into_iter()
+        .fold(false, |applied, candidate| {
+            apply_codexplusplus_icon_to_process_window(candidate, icon_resource_path.clone()) || applied
+        })
+}
+
+#[cfg(windows)]
+pub fn identity_icon_class_slots() -> [i32; 2] {
+    [GCLP_HICON.0, GCLP_HICONSM.0]
+}
+
+#[cfg(windows)]
+pub fn descendant_process_ids(root_process_id: u32, process_tree: &[(u32, u32)]) -> Vec<u32> {
+    let mut result = vec![root_process_id];
+    let mut cursor = 0;
+    while cursor < result.len() {
+        let parent = result[cursor];
+        for (process_id, parent_process_id) in process_tree {
+            if *parent_process_id == parent && !result.contains(process_id) {
+                result.push(*process_id);
+            }
+        }
+        cursor += 1;
+    }
+    result
 }
 
 #[cfg(windows)]
@@ -448,6 +584,11 @@ fn apply_window_icons(hwnd: HWND, icon_resource_path: &PathBuf) -> bool {
         return false;
     };
     unsafe {
+        // Electron's native title bar may ignore WM_SETICON and keep reading the
+        // icon from its shared window class. Update both sources, then ask
+        // Windows to repaint the non-client frame without changing geometry.
+        SetClassLongPtrW(hwnd, GCLP_HICON, large_icon.0 as isize);
+        SetClassLongPtrW(hwnd, GCLP_HICONSM, small_icon.0 as isize);
         SendMessageW(
             hwnd,
             WM_SETICON,
@@ -460,39 +601,37 @@ fn apply_window_icons(hwnd: HWND, icon_resource_path: &PathBuf) -> bool {
             WPARAM(ICON_SMALL as usize),
             LPARAM(small_icon.0 as isize),
         );
+        let _ = SetWindowPos(
+            hwnd,
+            HWND::default(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        );
     }
     true
 }
 
 #[cfg(windows)]
 fn load_cached_icons(icon_resource_path: &PathBuf) -> Option<(HICON, HICON)> {
-    static ICONS: OnceLock<(usize, usize)> = OnceLock::new();
-    let icons = ICONS.get_or_init(|| {
-        let path = wide_null(icon_resource_path.as_os_str());
-        let mut large_icon = HICON::default();
-        let mut small_icon = HICON::default();
-        let loaded = unsafe {
-            ExtractIconExW(
-                PCWSTR(path.as_ptr()),
-                0,
-                Some(&mut large_icon),
-                Some(&mut small_icon),
-                1,
-            )
-        };
-        if loaded == 0 {
-            (0, 0)
-        } else {
-            (large_icon.0 as usize, small_icon.0 as usize)
-        }
-    });
-    if icons.0 == 0 || icons.1 == 0 {
+    let path = wide_null(icon_resource_path.as_os_str());
+    let mut large_icon = HICON::default();
+    let mut small_icon = HICON::default();
+    let loaded = unsafe {
+        ExtractIconExW(
+            PCWSTR(path.as_ptr()),
+            0,
+            Some(&mut large_icon),
+            Some(&mut small_icon),
+            1,
+        )
+    };
+    if loaded == 0 || large_icon.is_invalid() || small_icon.is_invalid() {
         None
     } else {
-        Some((
-            HICON(icons.0 as *mut core::ffi::c_void),
-            HICON(icons.1 as *mut core::ffi::c_void),
-        ))
+        Some((large_icon, small_icon))
     }
 }
 
