@@ -1,15 +1,17 @@
 {
-  "version": "1.3.93",
-  "downloadUrl": "http://115.190.199.191:20080/downloads/codework-ai-client-1.3.93-windows-x64-setup.exe",
-  "size": 18105723,
-  "sha256": "41b3e60c4b96438e34e713591eb599bd42176a2429a88128c649886d69756b7e",
-  "signature": "R9aDgqOgioAwzRCgdhCUT7bnOoaQW8AWMwZUCm3dlqHBX16McYDXXXOPZRjSbH06AoHb35sJRwTLIi7t7RcKBw==",
-  "publishedAt": "2026-08-01T00:00:00Z",
+  "version": "1.3.100",
+  "downloadUrl": "http://115.190.199.191:20080/downloads/codework-ai-client-1.3.100-windows-x64-setup.exe",
+  "size": 18106188,
+  "sha256": "77ced6548286bf2d36e9ca78529344a0017c12286eda67165528a2049592e093",
+  "signature": "XIpY7uJODUgLIFTrPrF+WGU1zfLMoLNaGRsx/yl0CalHdmeAhKMnwMTp+8aSDJeGaDCFbrRY/O607XvO7dKhCQ==",
+  "publishedAt": "2026-08-06T00:58:01Z",
   "minimumSupportedVersion": "1.3.19",
   "mandatory": false,
   "notes": [
-    "修复自定义壁纸在新版 Codex 主内容区的白屏与叠层问题。",
-    "优化浅色壁纸下的侧边栏、任务和 Markdown 文字可读性。",
-    "顶部首页/对话控制改为实际遮罩百分比，可分别调节阅读层透明度。"
+    "修复「国产模型 0.5X」分组只显示单个模型的问题：中转站未限制模型时展示分组内全部可用模型，有限制时只展示被授权的那几个。",
+    "修复 WorkBuddy 安装在非默认目录时被误判为「未检测到 WorkBuddy」的问题，安装位置改为多途径发现。",
+    "一键同步国产模型后可直接拉起本机已安装的 WorkBuddy，不再错误跳转下载页。",
+    "重建自动更新签名密钥链：本版之后的自动更新恢复可用，1.3.94 至 1.3.99 需手动安装一次。",
+    "覆盖安装会保留原有账号、模型、令牌、供应商、聊天记录与个性化配置。"
   ]
 }
