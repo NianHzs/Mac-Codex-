@@ -37,6 +37,15 @@ try {
         Write-Host "RETIRED_PREVIOUS_DIST=$retiredDist"
     }
 
+    # npm ci 会先整体清空 node_modules，同样撞上 safe-delete 的批量删除阈值
+    # （依赖树轻松上千个文件）。与 dist 同一处理：先挪走再让 npm 重建。
+    $nodeModulesDir = Join-Path $manager 'node_modules'
+    if (Test-Path -LiteralPath $nodeModulesDir) {
+        $retiredModules = Join-Path $env:TEMP ('codework-node-modules-retired-' + (Get-Date -Format 'yyyyMMddHHmmssfff'))
+        Move-Item -LiteralPath $nodeModulesDir -Destination $retiredModules -Force
+        Write-Host "RETIRED_PREVIOUS_NODE_MODULES=$retiredModules"
+    }
+
     npm ci
     Assert-NativeSuccess 'npm ci' $LASTEXITCODE
     npm run check
@@ -160,36 +169,79 @@ try {
         'cubence.com?source=codexplusplus',
         $legacyAlipayLabel
     )
+    # 二进制里搜字面量：原来调用外部 rg，但它不一定在 PATH 上（不同 shell 环境差异很大），
+    # 而这道扫描是发布前的最后一道闸门，不该依赖可选工具。改用原生实现：
+    # 按 UTF-8 与 UTF-16LE 两种编码把文本转成字节序列，再在文件字节流里做子串匹配。
+    # 两种编码都查是必要的 —— Rust 二进制里的字符串是 UTF-8，而 NSIS 安装器
+    # 与前端资源里的中文是 UTF-16LE，只查一种会漏。
+    function Test-BinaryContainsText {
+        param(
+            [Parameter(Mandatory = $true)][string[]] $SearchRoots,
+            [Parameter(Mandatory = $true)][string] $Text
+        )
+        $needles = @(
+            [System.Text.Encoding]::UTF8.GetBytes($Text),
+            [System.Text.Encoding]::Unicode.GetBytes($Text)
+        )
+        $matches = @()
+        $files = foreach ($root in $SearchRoots) {
+            if (-not (Test-Path -LiteralPath $root)) { continue }
+            if (Test-Path -LiteralPath $root -PathType Leaf) {
+                Get-Item -LiteralPath $root
+            } else {
+                Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue
+            }
+        }
+        foreach ($file in $files) {
+            $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+            foreach ($needle in $needles) {
+                if ($needle.Length -eq 0 -or $bytes.Length -lt $needle.Length) { continue }
+                $limit = $bytes.Length - $needle.Length
+                for ($i = 0; $i -le $limit; $i++) {
+                    if ($bytes[$i] -ne $needle[0]) { continue }
+                    $hit = $true
+                    for ($j = 1; $j -lt $needle.Length; $j++) {
+                        if ($bytes[$i + $j] -ne $needle[$j]) { $hit = $false; break }
+                    }
+                    if ($hit) { $matches += $file.FullName; break }
+                }
+                if ($matches -contains $file.FullName) { break }
+            }
+        }
+        return $matches
+    }
+
+    $scanRoots = @($stage, $installer, (Join-Path $manager 'dist'))
     foreach ($forbiddenText in $forbiddenStrings) {
-        $scanOutput = & rg -F -a -n -- $forbiddenText $stage $installer (Join-Path $manager 'dist') 2>&1
-        $scanExit = $LASTEXITCODE
-        if ($scanExit -eq 0) {
-            throw "Forbidden promotional content found ($forbiddenText):`n$($scanOutput -join [Environment]::NewLine)"
+        $hits = Test-BinaryContainsText -SearchRoots $scanRoots -Text $forbiddenText
+        if ($hits.Count -gt 0) {
+            throw "Forbidden promotional content found ($forbiddenText):`n$($hits -join [Environment]::NewLine)"
         }
-        if ($scanExit -ne 1) {
-            throw "rg forbidden-content scan failed for '$forbiddenText' with exit code $scanExit"
-        }
+        Write-Host "FORBIDDEN_SCAN_CLEAN=$forbiddenText"
     }
 
     $requiredBinaryStrings = @(
         $publicProductName
     )
     foreach ($requiredText in $requiredBinaryStrings) {
-        & rg -F -a -l -- $requiredText $stage | Out-Null
-        if ($LASTEXITCODE -ne 0) {
+        $hits = Test-BinaryContainsText -SearchRoots @($stage) -Text $requiredText
+        if ($hits.Count -eq 0) {
             throw "Required Codework identity is missing from staged binaries: $requiredText"
         }
+        Write-Host "REQUIRED_IDENTITY_PRESENT=$requiredText"
     }
 
     $requiredFrontendStrings = @(
         'https://gptproxy.site/register?aff=Kw5y',
         'https://gptproxy.site/v1'
     )
+    $frontendDist = Join-Path $manager 'dist'
     foreach ($requiredText in $requiredFrontendStrings) {
-        & rg -F -l -- $requiredText (Join-Path $manager 'dist') | Out-Null
-        if ($LASTEXITCODE -ne 0) {
+        $hits = Test-BinaryContainsText -SearchRoots @($frontendDist) -Text $requiredText
+        if ($hits.Count -eq 0) {
             throw "Required Codework provider endpoint is missing from the built frontend: $requiredText"
         }
+        Write-Host "REQUIRED_FRONTEND_PRESENT=$requiredText"
     }
 
     $releaseDir = Join-Path $releaseRoot "$publicProductName-$version"

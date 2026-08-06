@@ -641,16 +641,32 @@ fn codework_installer_is_independent_and_packages_notices() {
     assert!(build_script.contains("$legacyAlipayLabel = -join"));
     assert!(build_script.contains("0x652F, 0x4ED8, 0x5B9D, 0x8D5E, 0x8D4F, 0x7801"));
     assert!(!build_script.contains("支付宝赞赏码"));
+    // 字面量扫描原来调用外部 rg，但它不保证在 PATH 上，而这是发布前最后一道闸门，
+    // 不该依赖可选工具。现在用脚本内的 Test-BinaryContainsText（UTF-8 + UTF-16LE
+    // 双编码字节级匹配）。断言改为盯住能力与覆盖范围，而不是某个命令的字面写法。
+    assert!(build_script.contains("function Test-BinaryContainsText"));
+    assert!(build_script.contains("[System.Text.Encoding]::UTF8.GetBytes($Text)"));
+    assert!(build_script.contains("[System.Text.Encoding]::Unicode.GetBytes($Text)"));
+    assert!(build_script.contains("[System.IO.File]::ReadAllBytes($file.FullName)"));
     assert!(build_script.contains(
-        "& rg -F -a -n -- $forbiddenText $stage $installer (Join-Path $manager 'dist')"
+        "$scanRoots = @($stage, $installer, (Join-Path $manager 'dist'))"
+    ));
+    assert!(build_script.contains(
+        "Test-BinaryContainsText -SearchRoots $scanRoots -Text $forbiddenText"
     ));
     assert!(!build_script.contains("$forbidden = '"));
     assert!(build_script.contains("$requiredBinaryStrings = @("));
     assert!(build_script.contains("$publicProductName = -join (0x265B"));
     assert!(build_script.contains("$releaseDir = Join-Path $releaseRoot \"$publicProductName-$version\""));
     assert!(build_script.contains("$requiredFrontendStrings = @("));
-    assert!(build_script.contains("& rg -F -a -l -- $requiredText $stage"));
-    assert!(build_script.contains("& rg -F -l -- $requiredText (Join-Path $manager 'dist')"));
+    assert!(build_script.contains(
+        "Test-BinaryContainsText -SearchRoots @($stage) -Text $requiredText"
+    ));
+    assert!(build_script.contains(
+        "Test-BinaryContainsText -SearchRoots @($frontendDist) -Text $requiredText"
+    ));
+    // 扫描不能依赖不一定存在的外部工具
+    assert!(!build_script.contains("& rg "));
     assert!(!build_script.contains("$requiredPattern ="));
     assert!(frontend_brand.contains("CODEWORK_PRODUCT_NAME = \"♛Codework AI客户端\""));
     assert!(notices.contains("MIT License"));
