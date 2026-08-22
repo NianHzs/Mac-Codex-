@@ -307,6 +307,18 @@ fn github_release_workflow_can_publish_macos_packages_to_1panel() {
 }
 
 #[test]
+fn manager_build_script_only_uses_windows_attributes_on_windows() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let build_script = manifest_dir.join("build.rs");
+    let build_script = std::fs::read_to_string(&build_script).expect("read manager build script");
+
+    assert!(build_script.contains("#[cfg(windows)]"));
+    assert!(build_script.contains("WindowsAttributes::new()"));
+    assert!(build_script.contains("#[cfg(not(windows))]"));
+    assert!(build_script.contains("let attrs = tauri_build::Attributes::new();"));
+}
+
+#[test]
 fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let app_tsx = manifest_dir.parent().unwrap().join("src/App.tsx");
