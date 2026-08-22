@@ -23,15 +23,15 @@ Codex++ is an external enhancement launcher and manager for the Codex App. It do
 Download the latest installer from [GitHub Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases):
 
 - Windows: `CodexPlusPlus-*-windows-x64-setup.exe`
-- macOS Intel: `CodexPlusPlus-*-macos-x64.dmg`
-- macOS Apple Silicon: `CodexPlusPlus-*-macos-arm64.dmg`
+- macOS Intel: `Codework-AI客户端-*-macos-x64.dmg`
+- macOS Apple Silicon: `Codework-AI客户端-*-macos-arm64.dmg`
 
 After installation, two entry points are available:
 
 - `Codex++`: a silent launcher. It does not show the manager UI and only starts Codex with Codex++ injection.
 - `Codex++ Manager`: a Tauri control panel for launch, diagnostics, repair, updates, relay injection, enhancements, and user scripts.
 
-The Windows installer creates desktop and Start Menu shortcuts. The macOS DMG installs `/Applications/Codex++.app` and `/Applications/Codex++ 管理工具.app`.
+The Windows installer creates desktop and Start Menu shortcuts. The macOS DMG installs `/Applications/♛Codework AI客户端.app` and `/Applications/♛Codework AI客户端 管理工具.app`.
 
 ## Sponsors
 

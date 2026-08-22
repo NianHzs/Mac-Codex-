@@ -23,15 +23,15 @@ Codex++ 是面向 Codex App 的外部增强启动器和管理工具。它不修�
 从 [GitHub Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases) 下载最新版安装包：
 
 - Windows：`CodexPlusPlus-*-windows-x64-setup.exe`
-- macOS Intel：`CodexPlusPlus-*-macos-x64.dmg`
-- macOS Apple Silicon：`CodexPlusPlus-*-macos-arm64.dmg`
+- macOS Intel：`Codework-AI客户端-*-macos-x64.dmg`
+- macOS Apple Silicon：`Codework-AI客户端-*-macos-arm64.dmg`
 
 安装后会有两个入口：
 
-- `Codex++`：静默启动入口，不显示管理界面，只负责启动 Codex 并注入增强功能。
-- `Codex++ 管理工具`：Tauri 控制面板，用于启动、检查、修复、更新、配置中转注入、管理增强功能和用户脚本。
+- `♛Codework AI客户端`：静默启动入口，不显示管理界面，只负责启动 Codex 并注入增强功能。
+- `♛Codework AI客户端 管理工具`：Tauri 控制面板，用于启动、检查、修复、更新、配置中转注入、管理增强功能和用户脚本。
 
-Windows 安装包会创建桌面和开始菜单快捷方式。macOS DMG 会安装 `/Applications/Codex++.app` 和 `/Applications/Codex++ 管理工具.app`。
+Windows 安装包会创建桌面和开始菜单快捷方式。macOS DMG 会安装 `/Applications/♛Codework AI客户端.app` 和 `/Applications/♛Codework AI客户端 管理工具.app`。
 
 ## 赞助商
 

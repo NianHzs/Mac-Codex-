@@ -126,14 +126,14 @@ jobs:
           mkdir -p dist/macos/app-${{ matrix.arch }}
           cp "target/${{ matrix.target }}/release/codex-plus-plus" "dist/macos/app-${{ matrix.arch }}/"
           cp "target/${{ matrix.target }}/release/codex-plus-plus-manager" "dist/macos/app-${{ matrix.arch }}/"
-          (cd dist/macos && zip -r "CodexPlusPlus-${VERSION}-macos-${{ matrix.arch }}.zip" "app-${{ matrix.arch }}")
+          (cd dist/macos && zip -r "Codework-AI客户端-${VERSION}-macos-${{ matrix.arch }}.zip" "app-${{ matrix.arch }}")
 
       - name: Verify macOS bundle structure
         run: |
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Codex++.app" "dist/macos/stage/Codex++ 管理工具.app"; do
+          for app in "dist/macos/stage/♛Codework AI客户端.app" "dist/macos/stage/♛Codework AI客户端 管理工具.app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
@@ -194,3 +194,117 @@ jobs:
           REPO: ${{ github.repository }}
         shell: bash
         run: gh release upload "$TAG" latest.json --clobber --repo "$REPO"
+
+  publish-macos-to-1panel:
+    name: Publish macOS packages to 1Panel
+    runs-on: ubuntu-latest
+    needs: macos-dmg
+    env:
+      DEPLOY_KEY: ${{ secrets.CODEWORK_1PANEL_SSH_PRIVATE_KEY }}
+      PANEL_HOST: ${{ secrets.CODEWORK_1PANEL_SSH_HOST || '115.190.199.191' }}
+      PANEL_PORT: ${{ secrets.CODEWORK_1PANEL_SSH_PORT || '2222' }}
+      PANEL_USER: ${{ secrets.CODEWORK_1PANEL_SSH_USER || 'root' }}
+      PANEL_RELEASE_DIR: /var/lib/docker/volumes/xiaoshuai-lottery_lottery_data/_data/downloads
+      PUBLIC_BASE_URL: http://115.190.199.191:20080/downloads
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Check optional 1Panel deployment key
+        id: deployment
+        shell: bash
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "1Panel deployment skipped: CODEWORK_1PANEL_SSH_PRIVATE_KEY is not configured."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure 1Panel SSH access
+        if: steps.deployment.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_codework_1panel
+          chmod 600 ~/.ssh/id_codework_1panel
+          ssh-keyscan -p "$PANEL_PORT" -H "$PANEL_HOST" >> ~/.ssh/known_hosts
+
+      - name: Download macOS release files
+        if: steps.deployment.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          VERSION="${VERSION#V}"
+          mkdir -p release/macos
+          gh release download "$TAG" --repo "$REPO" --dir release/macos \
+            --pattern "Codework-AI客户端-${VERSION}-macos-*.dmg" \
+            --pattern "Codework-AI客户端-${VERSION}-macos-*.zip"
+          test -f "release/macos/Codework-AI客户端-${VERSION}-macos-x64.dmg"
+          test -f "release/macos/Codework-AI客户端-${VERSION}-macos-arm64.dmg"
+
+      - name: Create public macOS manifest
+        if: steps.deployment.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const dir = path.join(process.cwd(), 'release', 'macos');
+          const version = process.env.TAG.replace(/^v/i, '');
+          const baseUrl = process.env.PUBLIC_BASE_URL.replace(/\/+$/, '');
+          const assets = {};
+          for (const name of fs.readdirSync(dir).filter((item) => /-macos-(x64|arm64)\.(dmg|zip)$/.test(item))) {
+            const [, arch, format] = name.match(/-macos-(x64|arm64)\.(dmg|zip)$/);
+            const contents = fs.readFileSync(path.join(dir, name));
+            assets[arch] ??= {};
+            assets[arch][format] = {
+              fileName: name,
+              downloadUrl: `${baseUrl}/${encodeURIComponent(name)}`,
+              size: contents.length,
+              sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+            };
+          }
+          for (const arch of ['x64', 'arm64']) {
+            if (!assets[arch]?.dmg) throw new Error(`Missing ${arch} DMG.`);
+          }
+          fs.writeFileSync(path.join(dir, 'codework-ai-client-macos.json'), `${JSON.stringify({
+            version,
+            publishedAt: new Date().toISOString(),
+            assets,
+          }, null, 2)}\n`);
+          NODE
+          find release/macos -maxdepth 1 -type f -printf '%f\n' | sort > release-files.txt
+          (cd release/macos && sha256sum $(cat ../../release-files.txt)) > SHA256SUMS
+
+      - name: Verify and publish files on 1Panel
+        if: steps.deployment.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          VERSION="${VERSION#V}"
+          STAGE_DIR="/tmp/codework-macos-${VERSION}-${GITHUB_RUN_ID}"
+          SSH=(ssh -i ~/.ssh/id_codework_1panel -p "$PANEL_PORT" -o BatchMode=yes)
+          SCP=(scp -i ~/.ssh/id_codework_1panel -P "$PANEL_PORT" -o BatchMode=yes)
+          "${SSH[@]}" "$PANEL_USER@$PANEL_HOST" "set -eu; test -d '$PANEL_RELEASE_DIR'; mkdir -p '$STAGE_DIR'"
+          "${SCP[@]}" release/macos/* SHA256SUMS release-files.txt "$PANEL_USER@$PANEL_HOST:$STAGE_DIR/"
+          "${SSH[@]}" "$PANEL_USER@$PANEL_HOST" "set -eu; cd '$STAGE_DIR'; sha256sum -c SHA256SUMS; while IFS= read -r file; do case \"\$file\" in codework-ai-client-macos.json) ;; *) install -m 0644 \"\$file\" '$PANEL_RELEASE_DIR/'\"\$file\" ;; esac; done < release-files.txt; install -m 0644 codework-ai-client-macos.json '$PANEL_RELEASE_DIR/codework-ai-client-macos.json'"
+
+      - name: Verify public macOS manifest
+        if: steps.deployment.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$PUBLIC_BASE_URL/codework-ai-client-macos.json" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk).on("end", () => {
+              const manifest = JSON.parse(raw);
+              if (!manifest.assets?.x64?.dmg || !manifest.assets?.arm64?.dmg) process.exit(1);
+              console.log(`Published macOS ${manifest.version}: x64 and arm64 DMGs are available.`);
+            });
+          '

@@ -244,12 +244,12 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains("<key>LSUIElement</key>"));
     assert!(script.contains("ARCH=\"${2:-$(uname -m)}\""));
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
-    assert!(script.contains("CodexPlusPlus-${VERSION}-macos-${ARCH}.dmg"));
+    assert!(script.contains("Codework-AI客户端-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"Codex++\" \"CodexPlusPlus\" \"$BINARY_DIR/codex-plus-plus\" \"com.bigpizzav3.codexplusplus\" \"true\""
+        "create_app \"$PRODUCT_NAME\" \"CodeworkCodexPlusPlus\" \"$BINARY_DIR/codex-plus-plus\" \"com.codework.codexplusplus\" \"true\""
     ));
     assert!(script.contains(
-        "create_app \"Codex++ 管理工具\" \"CodexPlusPlusManager\" \"$BINARY_DIR/codex-plus-plus-manager\" \"com.bigpizzav3.codexplusplus.manager\" \"false\""
+        "create_app \"$MANAGER_NAME\" \"CodeworkCodexPlusPlusManager\" \"$BINARY_DIR/codex-plus-plus-manager\" \"com.codework.codexplusplus.manager\" \"false\""
     ));
 }
 
@@ -286,6 +286,24 @@ fn github_release_workflow_uploads_static_latest_json() {
     assert!(workflow.contains("latest-json:"));
     assert!(workflow.contains("latest.json"));
     assert!(workflow.contains("gh release upload \"$TAG\" latest.json --clobber"));
+}
+
+#[test]
+fn github_release_workflow_can_publish_macos_packages_to_1panel() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflow = manifest_dir
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::parent)
+        .unwrap()
+        .join(".github/workflows/release-assets.yml");
+    let workflow = std::fs::read_to_string(&workflow).expect("read release assets workflow");
+
+    assert!(workflow.contains("publish-macos-to-1panel:"));
+    assert!(workflow.contains("CODEWORK_1PANEL_SSH_PRIVATE_KEY"));
+    assert!(workflow.contains("codework-ai-client-macos.json"));
+    assert!(workflow.contains("sha256sum -c SHA256SUMS"));
+    assert!(workflow.contains("Codework-AI客户端-${VERSION}-macos-*.dmg"));
 }
 
 #[test]
