@@ -652,15 +652,22 @@ pub fn sync_client_identity_window_icon(active_role: String) -> CommandResult<Va
         .flatten()
         .and_then(|status| status.process_id);
     #[cfg(windows)]
-    let mut applied = false;
-    if let Some(process_id) = process_id {
-        for attempt in 0..3 {
-            applied |= codex_plus_core::windows_apply_codexplusplus_icon_to_process_tree(process_id, icon_path.clone());
-            if attempt < 2 {
-                std::thread::sleep(std::time::Duration::from_millis(350));
+    let applied = {
+        let mut applied = false;
+        if let Some(process_id) = process_id {
+            for attempt in 0..3 {
+                applied |= codex_plus_core::windows_apply_codexplusplus_icon_to_process_tree(
+                    process_id,
+                    icon_path.clone(),
+                );
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(350));
+                }
             }
         }
-    }
+        applied
+    };
+
     #[cfg(not(windows))]
     let applied = false;
 
