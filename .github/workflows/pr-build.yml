@@ -147,14 +147,38 @@ jobs:
           if-no-files-found: warn
 
       - name: Build macOS DMG
+        shell: bash
         run: |
+          set -o pipefail
+          set +e
           VERSION="${GITHUB_REF_NAME#v}"
           VERSION="${VERSION#V}"
           VERSION="${VERSION//\//-}"
           if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
             VERSION="0.0.0-${GITHUB_RUN_NUMBER}"
           fi
-          BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
+          BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}" 2>&1 | tee macos-package.log
+          package_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$package_status" -ne 0 ]; then
+            {
+              echo "### macOS DMG packaging failed"
+              echo '```text'
+              tail -n 180 macos-package.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            package_error="$(tail -n 80 macos-package.log | awk '{ gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0 }')"
+            echo "::error title=macOS DMG packaging failure::$package_error"
+            exit "$package_status"
+          fi
+
+      - name: Upload macOS packaging log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-plus-plus-macos-${{ matrix.arch }}-package-log
+          path: macos-package.log
+          if-no-files-found: warn
 
       - name: Verify macOS bundle structure
         run: |
