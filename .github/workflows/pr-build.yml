@@ -138,6 +138,14 @@ jobs:
             exit "$build_status"
           fi
 
+      - name: Upload macOS build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-plus-plus-macos-${{ matrix.arch }}-build-log
+          path: macos-build.log
+          if-no-files-found: warn
+
       - name: Build macOS DMG
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
