@@ -133,6 +133,8 @@ jobs:
               tail -n 180 macos-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            build_error="$(tail -n 80 macos-build.log | awk '{ gsub(/%/, "%25"); gsub(/\r/, "%0D"); printf "%s%%0A", $0 }')"
+            echo "::error title=macOS release build failure::$build_error"
             exit "$build_status"
           fi
 
