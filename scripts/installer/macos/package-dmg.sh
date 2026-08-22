@@ -120,8 +120,8 @@ verify_app() {
 }
 
 prepare_icon
-create_app "$PRODUCT_NAME" "CodeworkCodexPlusPlus" "$BINARY_DIR/codex-plus-plus" "com.codework.codexplusplus" "true"
-create_app "$MANAGER_NAME" "CodeworkCodexPlusPlusManager" "$BINARY_DIR/codex-plus-plus-manager" "com.codework.codexplusplus.manager" "false"
+create_app "$PRODUCT_NAME" "CodeworkCodexPlusPlus" "$BINARY_DIR/codework-codex-plus-plus" "com.codework.codexplusplus" "true"
+create_app "$MANAGER_NAME" "CodeworkCodexPlusPlusManager" "$BINARY_DIR/codework-codex-plus-plus-manager" "com.codework.codexplusplus.manager" "false"
 
 sign_app "$STAGE/$PRODUCT_NAME.app"
 sign_app "$STAGE/$MANAGER_NAME.app"

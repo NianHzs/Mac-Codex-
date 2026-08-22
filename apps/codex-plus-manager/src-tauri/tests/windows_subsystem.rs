@@ -246,10 +246,10 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
     assert!(script.contains("Codework-AI客户端-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"$PRODUCT_NAME\" \"CodeworkCodexPlusPlus\" \"$BINARY_DIR/codex-plus-plus\" \"com.codework.codexplusplus\" \"true\""
+        "create_app \"$PRODUCT_NAME\" \"CodeworkCodexPlusPlus\" \"$BINARY_DIR/codework-codex-plus-plus\" \"com.codework.codexplusplus\" \"true\""
     ));
     assert!(script.contains(
-        "create_app \"$MANAGER_NAME\" \"CodeworkCodexPlusPlusManager\" \"$BINARY_DIR/codex-plus-plus-manager\" \"com.codework.codexplusplus.manager\" \"false\""
+        "create_app \"$MANAGER_NAME\" \"CodeworkCodexPlusPlusManager\" \"$BINARY_DIR/codework-codex-plus-plus-manager\" \"com.codework.codexplusplus.manager\" \"false\""
     ));
 }
 
