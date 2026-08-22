@@ -119,7 +119,22 @@ jobs:
         run: npm run vite:build
 
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          cargo build --release --target ${{ matrix.target }} 2>&1 | tee macos-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            {
+              echo "### macOS release build failed"
+              echo '```text'
+              tail -n 180 macos-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$build_status"
+          fi
 
       - name: Build macOS DMG
         run: |
