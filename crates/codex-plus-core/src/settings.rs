@@ -17,6 +17,9 @@ const RELAY_GLOBAL_API_KEY_SECRET: &str = "relay/global/api-key";
 const STEPWISE_API_KEY_SECRET: &str = "stepwise/api-key";
 const THEME_MEMBER_TOKEN_SECRET: &str = "theme/member-token";
 
+const LEGACY_CODEWORK_MODEL_LIST: &str = "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5";
+const CODEWORK_MODEL_LIST: &str = "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5\ngpt-6-astra";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LaunchMode {
@@ -154,7 +157,7 @@ impl Default for RelayProfile {
             context_window: String::new(),
             auto_compact_limit: String::new(),
             model_insert_mode: RelayModelInsertMode::Patch,
-            model_list: "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5".to_string(),
+            model_list: CODEWORK_MODEL_LIST.to_string(),
             model_windows: String::new(),
             user_agent: String::new(),
         }
@@ -1400,6 +1403,7 @@ fn settings_to_object(settings: &BackendSettings) -> Map<String, Value> {
 }
 
 fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendSettings {
+    migrate_codework_builtin_model_list(&mut settings);
     let (common, extracted_context) =
         split_context_config_sections(&settings.relay_common_config_contents);
     let context = join_config_sections(&[
@@ -1437,6 +1441,16 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     settings.codex_app_stepwise_timeout_ms =
         clamp_stepwise_timeout_ms(settings.codex_app_stepwise_timeout_ms);
     settings
+}
+
+fn migrate_codework_builtin_model_list(settings: &mut BackendSettings) {
+    for profile in &mut settings.relay_profiles {
+        if profile.id == "codework-ai"
+            && profile.model_list.trim() == LEGACY_CODEWORK_MODEL_LIST
+        {
+            profile.model_list = CODEWORK_MODEL_LIST.to_string();
+        }
+    }
 }
 
 fn split_context_config_sections(config: &str) -> (String, String) {
@@ -1691,7 +1705,7 @@ experimental_bearer_token = "sk-bearer-secret"
         assert_eq!(profile.test_model, "gpt-5.6-sol");
         assert_eq!(
             profile.model_list,
-            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5"
+            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5\ngpt-6-astra"
         );
 
         let settings = BackendSettings::default();
@@ -1840,7 +1854,7 @@ experimental_bearer_token = "sk-bearer-secret"
         assert_eq!(profile.model_insert_mode, RelayModelInsertMode::Patch);
         assert_eq!(
             profile.model_list,
-            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5"
+            "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna\ngpt-5.5\ngpt-6-astra"
         );
     }
 
@@ -2350,6 +2364,24 @@ experimental_bearer_token = "sk-existing"
         assert_eq!(
             store.load().unwrap().codex_app_visual_theme_service_url,
             "https://themes.example.test/v1"
+        );
+    }
+
+    #[test]
+    fn legacy_codework_profile_receives_new_astra_model() {
+        let settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "codework-ai".to_string(),
+                model_list: LEGACY_CODEWORK_MODEL_LIST.to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let normalized = normalize_settings_config_sections(settings);
+        assert_eq!(
+            normalized.relay_profiles[0].model_list,
+            CODEWORK_MODEL_LIST
         );
     }
 
