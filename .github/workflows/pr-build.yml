@@ -50,8 +50,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist/windows/app | Out-Null
-          Copy-Item target/release/codex-plus-plus.exe dist/windows/app/
-          Copy-Item target/release/codex-plus-plus-manager.exe dist/windows/app/
+          Copy-Item target/release/codework-codex-plus-plus.exe dist/windows/app/
+          Copy-Item target/release/codework-codex-plus-plus-manager.exe dist/windows/app/
 
       - name: Build Windows installer
         shell: pwsh
@@ -59,7 +59,7 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart("v", "V")
           $version = $version -replace '[\\/]', '-'
           if (-not $version -or $version -eq "main") {
-            $version = "0.0.0-${{ github.run_number }}"
+            $version = "2.0.0"
           }
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
           if (-not (Test-Path $makensis)) {
